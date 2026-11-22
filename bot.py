@@ -5,22 +5,45 @@ import re
 import sys
 import time
 from contextlib import closing
+from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+from uuid import uuid4
 
 from game import COMMANDS, connect, play
+from telegram_menu import callback_command, present
 from world import advance_world
+
+
+FOREST_ART = Path(__file__).resolve().parent / "assets" / "misty-forest.jpg"
 
 
 class TelegramError(Exception):
     pass
 
 
-def telegram(token, method, **params):
+def telegram(token, method, photo=None, **params):
+    if photo is None:
+        body = json.dumps(params).encode()
+        content_type = "application/json"
+    else:
+        boundary = uuid4().hex
+        parts = []
+        for key, value in params.items():
+            field = json.dumps(value, ensure_ascii=False) if isinstance(value, dict) else str(value)
+            parts.append(
+                f'--{boundary}\r\nContent-Disposition: form-data; name="{key}"\r\n\r\n{field}\r\n'.encode()
+            )
+        parts.append(
+            (f'--{boundary}\r\nContent-Disposition: form-data; name="photo"; filename="misty-forest.jpg"\r\n'
+             'Content-Type: image/jpeg\r\n\r\n').encode() + photo + b"\r\n"
+        )
+        body = b"".join(parts) + f"--{boundary}--\r\n".encode()
+        content_type = f"multipart/form-data; boundary={boundary}"
     request = Request(
         f"https://api.telegram.org/bot{token}/{method}",
-        data=json.dumps(params).encode(),
-        headers={"Content-Type": "application/json"},
+        data=body,
+        headers={"Content-Type": content_type},
     )
     try:
         with urlopen(request, timeout=40) as response:
@@ -35,34 +58,71 @@ def telegram(token, method, **params):
 
 
 def queue_reply(db, update, bot_name):
-    message = update.get("message", {})
-    sender = message.get("from", {})
-    chat = message.get("chat", {})
-    content = message.get("text", "")
+    callback = update.get("callback_query")
+    message = callback.get("message", {}) if callback else update.get("message", {})
+    sender = (callback or message).get("from", {})
+    chat_id = message.get("chat", {}).get("id")
+    content = message.get("text", "") if not callback else ""
+    update_id = update["update_id"]
     with db:
-        # Acquire the write lock before reading or changing player state.
         db.execute("BEGIN IMMEDIATE")
         reply = None
-        if content.lstrip().startswith("/") and sender and not sender.get("is_bot"):
+        ui = {}
+        if callback:
+            ui["callback"] = {"callback_query_id": callback["id"]}
+            if sender and chat_id is not None:
+                content, notice = callback_command(db, sender["id"], callback.get("data", ""))
+                if notice:
+                    ui["callback"]["text"] = notice
+        if chat_id is not None and content.lstrip().startswith("/") and sender and not sender.get("is_bot"):
             reply = play(db, sender["id"], content, bot_name)
+            if reply:
+                reply, ui["markup"], ui["forest_photo"] = present(db, sender["id"], update_id, reply)
         db.execute(
             "UPDATE delivery SET next_offset = ?, chat_id = ?, reply = ? WHERE id = 1",
-            (update["update_id"] + 1, chat.get("id") if reply else None, reply),
+            (update_id + 1, chat_id if reply else None, reply),
+        )
+        db.execute(
+            "INSERT OR REPLACE INTO delivery_controls (id, payload) VALUES (1, ?)", (json.dumps(ui),)
         )
 
 
+def deliver_message(token, pending, ui):
+    params = {"chat_id": pending["chat_id"]}
+    if "markup" in ui:
+        params["reply_markup"] = ui["markup"]
+    if ui.get("forest_photo") and FOREST_ART.is_file():
+        try:
+            telegram(token, "sendPhoto", photo=FOREST_ART.read_bytes(), caption=pending["reply"], **params)
+            return
+        except TelegramError as error:
+            if error.args[0] != 400:
+                raise
+    telegram(token, "sendMessage", text=pending["reply"], **params)
+
+
 def send_pending(db, token):
-    pending = db.execute("SELECT * FROM delivery").fetchone()
+    pending = db.execute("""
+        SELECT delivery.*, payload FROM delivery LEFT JOIN delivery_controls USING (id)
+    """).fetchone()
+    ui = json.loads(pending["payload"]) if pending["payload"] else {}
+    if "callback" in ui:
+        try:
+            telegram(token, "answerCallbackQuery", **ui["callback"])
+        except TelegramError as error:
+            if error.args[0] != 400:
+                raise
     if pending["reply"]:
         try:
-            telegram(token, "sendMessage", chat_id=pending["chat_id"], text=pending["reply"])
+            deliver_message(token, pending, ui)
         except TelegramError as error:
-            # A departed chat or blocked bot must not stall everyone else's game.
             if error.args[0] not in {400, 403}:
                 raise
             print(f"Ответ недоставлен (Telegram {error}).", file=sys.stderr)
+    if pending["reply"] or pending["payload"]:
         with db:
             db.execute("UPDATE delivery SET reply = NULL, chat_id = NULL WHERE id = 1")
+            db.execute("DELETE FROM delivery_controls WHERE id = 1")
     return pending["next_offset"]
 
 
@@ -85,7 +145,7 @@ def main():
             try:
                 advance_world(db)
                 offset = send_pending(db, token)
-                updates = telegram(token, "getUpdates", offset=offset, timeout=25, allowed_updates=["message"])
+                updates = telegram(token, "getUpdates", offset=offset, timeout=25, allowed_updates=["message", "callback_query"])
                 for update in updates:
                     queue_reply(db, update, bot_name)
                     send_pending(db, token)

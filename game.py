@@ -50,6 +50,8 @@ HELP = """Живой мир
 /pvp — дуэли
 /raid — рейд на Каменного колосса"""
 
+ROUTE_MENU = "/adventure_forest — Туманный лес\n/adventure_ruins — Старая башня (с уровня 2)"
+
 PROFESSIONS = {"scout": "Следопыт", "herbalist": "Травник"}
 
 ROUTES = {
@@ -86,6 +88,14 @@ def connect(path):
             reply TEXT
         );
         INSERT OR IGNORE INTO delivery (id) VALUES (1);
+        CREATE TABLE IF NOT EXISTS delivery_controls (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            payload TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS encounter_controls (
+            user_id INTEGER PRIMARY KEY REFERENCES heroes(user_id),
+            update_id INTEGER NOT NULL
+        );
     """)
     db.execute("PRAGMA foreign_keys = ON")
     init_world(db)
@@ -181,7 +191,7 @@ def play(db, user_id, message, bot_name=None):
         if route:
             return encounter(route)
         if argument not in ROUTES:
-            return "/adventure_forest — Туманный лес\n/adventure_ruins — Старая башня (с уровня 2)"
+            return ROUTE_MENU
         if argument == "ruins" and level < 2:
             return "Старая башня откроется на уровне 2."
         db.execute("UPDATE heroes SET route = ? WHERE user_id = ?", (argument, user_id))
