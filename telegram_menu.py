@@ -9,29 +9,35 @@ from loot import ITEMS
 from art_catalog import (
     CHOICE_ART, GALLERY, QUEST_ART, ROUTE_ART, SCREEN_ART, TITLES, event_illustration,
 )
+from fieldwork import active_hunt
+from practice_games import active_practice
 from fieldwork_menu import ACTIONS as FIELDWORK_ACTIONS, fieldwork_view, step_command
 from adventures import ROUTE_MENU, ROUTES, current_scene, detour_state, encounter
 from campaign import CHAPTER_KEYS, story_state
+from contests import DAY, active_contest
 
 
 MENU = (
-    (("История", "story"), ("Герой", "hero"), ("Походы", "adventure")),
-    (("Поселение", "town"),),
-    (("Сумка", "bag"), ("Квесты", "npc"), ("Журнал", "journal")),
-    (("В отсутствие", "offline"), ("Мини-игры", "practice"), ("Галерея", "gallery")),
+    (("История", "story"), ("Походы", "adventure")),
+    (("Герой", "hero"), ("Город", "town"), ("Журнал", "journal")),
 )
-ACTIONS = FIELDWORK_ACTIONS | {action for row in MENU for _, action in row} | {
+HERO_MENU = (
+    (("Снаряжение", "bag"), ("Профессии", "professions")),
+    (("Фоновое занятие", "offline"), ("Мини-игры", "practice")),
+    (("Квесты", "npc"), ("Галерея", "gallery")),
+)
+ACTIONS = FIELDWORK_ACTIONS | {action for row in (*MENU, *HERO_MENU) for _, action in row} | {
     *(f"adventure_{key}" for key in ROUTES),
     *(f"region_{key}" for key in ROUTES),
     *(f"story_claim_{key}" for key in CHAPTER_KEYS),
-    "start", "professions",
+    "start", "help", "professions",
     *(f"quest_{key}" for key in QUESTS),
     "train_scout", "train_herbalist",
     "boss", "raid", "pvp",
     *{f"equip_{item}" for item in ITEMS},
 }
 CHOICE = re.compile(r"world:choose:([0-9]{1,19}):([12]|leave|aid|risk)")
-BACK = (("Главное меню", "start"),)
+BACK = (("Меню", "start"),)
 
 
 def controls(rows):
@@ -89,9 +95,28 @@ def journal_illustrations(db, user_id):
     return list(keys)
 
 
+def home_rows(db, user_id, hero):
+    if not hero:
+        return [(("Помощь с командами", "help"),)]
+    if active_hunt(db, user_id):
+        primary = ("Продолжить бой", "hunt")
+    elif hero["route"]:
+        primary = ("Продолжить поход", "adventure")
+    elif active_contest(db, user_id, int(time.time()) // DAY):
+        primary = ("Продолжить испытание", "town:battle")
+    elif active_practice(db, user_id):
+        primary = ("Продолжить мини-игру", "practice")
+    else:
+        primary = ("Продолжить историю", "story")
+    rows = [tuple(item for item in row if item[1] != primary[1]) for row in MENU]
+    return [(primary,), *rows]
+
+
 def present(db, user_id, update_id, reply, command, argument, route_before=None, subject_before=None):
     hero = db.execute("SELECT * FROM heroes WHERE user_id = ?", (user_id,)).fetchone()
     route = hero["route"] if hero else None
+    if command == "/start":
+        return controls(home_rows(db, user_id, hero)), "village"
     if route and command in {"/adventure", "/choose"} and reply.endswith(encounter(db, user_id, route)):
         index, scene, prepared = current_scene(db, user_id, route)
         _, _, detour = detour_state(db, user_id, route, index, prepared)
@@ -121,8 +146,11 @@ def present(db, user_id, update_id, reply, command, argument, route_before=None,
     if command == "/town" and hero:
         page = town.panel(db, hero, argument, int(time.time()))
         rows = [((item["label"], item["command"].replace(" ", ":")),) for item in page["buttons"]]
-        if page["section"]:
-            rows.append((("Поселение", "town"),))
+        if page.get("parent"):
+            group = page["parent"]
+            rows.append(((town.GROUPS[group][0], f"town:{group}"), ("Город", "town")))
+        elif page["section"]:
+            rows.append((("Все городские занятия", "town"),))
         return controls([*rows, BACK]), page["art"]
     if command in {"/story", "/story_claim"} and hero:
         current = story_state(db, user_id)["current"]
@@ -171,7 +199,7 @@ def present(db, user_id, update_id, reply, command, argument, route_before=None,
     if command == "/quest":
         art = QUEST_ART.get(argument, art)
     if command == "/hero":
-        rows = ((("Профессии", "professions"),), *MENU)
+        rows = (*HERO_MENU, BACK)
     if command in {"/professions", "/train"}:
         rows = (
             (("Следопыт", "art:scout"), ("Травник", "art:herbalist")),

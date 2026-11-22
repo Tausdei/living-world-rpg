@@ -17,6 +17,7 @@ from activities import QUESTS, stats
 from adventures import ROUTES, current_scene, detour_state
 from art_catalog import QUEST_ART, event_illustration, illustration_path
 from campaign import story_state
+from contests import DAY, active_contest
 from fieldwork import ENEMIES, HUNT_ACTIONS, active_hunt
 from game import PROFESSIONS, connect, play
 from practice_games import active_practice, practice_view
@@ -75,6 +76,7 @@ def state(db, user_id):
     """, (user_id,)).fetchall()
     hunt = active_hunt(db, user_id)
     practice = active_practice(db, user_id)
+    contest = active_contest(db, user_id, int(time.time()) // DAY)
     battle = None
     if hunt:
         key = hunt["enemy"]
@@ -102,10 +104,10 @@ def state(db, user_id):
         "bag": [{"key": row["item"], "quantity": row["quantity"], "worn": row["worn"],
                  "name": ITEMS[row["item"]][0], "slot": ITEMS[row["item"]][1],
                  "bonus": ITEMS[row["item"]][2]} for row in inventory],
-        "battle": battle, "practice": practice_view(practice) if practice else None,
+        "battle": battle, "activeContest": bool(contest), "practice": practice_view(practice) if practice else None,
         "job": current_job(db, user_id), "encounter": encounter,
         "story": story_state(db, user_id),
-        "townSections": list(town.SECTIONS),
+        "townSections": list(town.SECTIONS) + list(town.GROUPS),
         "routes": [{"key": key, "name": area.title, "art": area.art,
                     "level": area.level, "scenes": len(area.scenes),
                     "description": REGIONS[key], "difficulty": area.difficulty} for key, area in ROUTES.items()],

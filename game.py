@@ -143,8 +143,13 @@ def play(db, user_id, message, bot_name=None):
     if parsed is None:
         return None
     command, argument = parsed
-    if command in {"/start", "/help"}:
+    if command == "/help":
         return HELP
+    if command == "/start":
+        hero = db.execute("SELECT name FROM heroes WHERE user_id = ?", (user_id,)).fetchone()
+        if not hero:
+            return "Живой мир\nСоздай героя, чтобы начать историю. Введи /create и имя, например: /create Лира"
+        return f"Живой мир · {hero['name']}\nВыбери, что продолжить. Полный список команд — /help."
     if command == "/gallery":
         title, entries = GALLERY.get(argument, ("Галерея Живого мира", {}))
         if entries:

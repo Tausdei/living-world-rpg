@@ -4,8 +4,8 @@ from contests import DAY, MODES, STANCES, active_contest, contest, contest_scene
 from guilds import board, board_text, guild_command, guild_of, guild_text, init_guilds, invitations
 from loot import ITEMS
 from workshop import (
-    CAVE, FORGE_ACTIONS, PETS, POTIONS, active_effect, add, brew, cave, cave_run, companion, energy,
-    claim, claimed, count, forge, init_workshop, materials_text, pet, spend, spend_coins, training,
+    CAVE, FORGE_ACTIONS, MATERIALS, PETS, POTIONS, active_effect, add, balances, brew, cave, cave_run, companion, energy,
+    claim, claimed, count, forge, init_workshop, pet, spend, spend_coins, training,
 )
 
 
@@ -27,6 +27,20 @@ SECTIONS = {
     "forum": ("Форум", "quests"),
     "guildchat": ("Клановый чат", "guildhall"),
 }
+GROUPS = {
+    "group_craft": ("Добыча и ремесло", "smithy", ("cave", "forge", "lab", "trade")),
+    "group_battle": ("Бои и развитие", "coliseum", ("battle", "training", "pet", "records")),
+    "group_rewards": ("Задания и награды", "sage", ("sage", "chest", "collection")),
+    "group_players": ("Кланы и общение", "guildhall", ("clan", "chat", "guildchat", "forum", "mail")),
+}
+SECTION_GROUP = {key: group for group, (_, _, keys) in GROUPS.items() for key in keys}
+FIELD_LABELS = {
+    "clan create": "Создать клан", "clan join": "Вступить или подать заявку",
+    "clan invite": "Пригласить", "clan approve": "Одобрить заявку",
+    "forum post": "Создать тему", "forum open": "Открыть тему", "forum reply": "Ответить",
+    "mail send": "Отправить письмо",
+}
+NUMERIC_FIELDS = {"clan join", "clan invite", "clan approve", "forum open"}
 EXCHANGE = {
     "gold": ("12 монет → 1 золото", "coins", 12, "gold", 1),
     "ore": ("1 золото → 4 руды", "gold", 1, "ore", 4),
@@ -162,16 +176,26 @@ def panel(db, hero, argument, now):
     section, action, value = parse(argument)
     user_id, day = hero["user_id"], now // DAY
     buttons, fields = [], []
+    if section in GROUPS:
+        title, art, keys = GROUPS[section]
+        return {"section": section, "title": title, "art": art, "text": "",
+                "buttons": [{**button(SECTIONS[key][0], key), "art": SECTIONS[key][1]} for key in keys],
+                "fields": [], "directory": True, "parent": ""}
     if section not in SECTIONS:
-        return {"section": "", "title": "Поселение", "art": "village",
-                "text": "Кузница, ремесло, добыча и общие испытания.",
-                "buttons": [{**button(name, key), "art": image} for key, (name, image) in SECTIONS.items()], "fields": []}
+        return {"section": "", "title": "Город", "art": "village",
+                "text": "Выбери, чем заняться в поселении.",
+                "buttons": [{**button(name, key), "art": image,
+                             "detail": ", ".join(SECTIONS[entry][0] for entry in keys)}
+                            for key, (name, image, keys) in GROUPS.items()],
+                "fields": [], "directory": True}
     title, art = SECTIONS[section]
     text = ""
+    ready_at = None
     if section == "cave":
         run = cave_run(db, user_id)
         if run:
-            remaining = max(0, run["ready_at"] - now)
+            ready_at = run["ready_at"]
+            remaining = max(0, ready_at - now)
             text = f"{CAVE[run['trail']][0]} · " + (f"осталось {remaining} сек." if remaining else "добыча ждёт.")
             buttons = [button("Забрать добычу", "cave collect")]
         else:
@@ -305,13 +329,17 @@ def panel(db, hero, argument, now):
         else:
             text = "Клановый чат доступен участникам клана."
 
-    if section in {"cave", "forge", "lab", "trade", "sage", "battle", "pet", "chest"}:
-        text += "\n" + materials_text(db, user_id)
-    return {"section": section, "title": title, "art": art, "text": text,
-            "buttons": buttons, "fields": [{"label": label, "command": "town " + cmd} for label, cmd in fields]}
+    has_resources = section in {"cave", "forge", "lab", "trade", "sage", "battle", "pet", "chest"}
+    resources = {MATERIALS[key]: value for key, value in balances(db, user_id).items()} if has_resources else {}
+    return {"section": section, "title": title, "art": art, "text": text, "parent": SECTION_GROUP[section],
+            "resources": resources, "readyAt": ready_at, "serverTime": now, "buttons": buttons,
+            "fields": [{"label": label, "command": "town " + cmd, "submit": FIELD_LABELS.get(cmd, "Отправить"),
+                        "numeric": cmd in NUMERIC_FIELDS} for label, cmd in fields]}
 
 
 def town_text(view):
-    lines = [view["title"], view["text"]]
+    lines = [part for part in (view["title"], view["text"]) if part]
+    if view.get("resources"):
+        lines.append(" · ".join(f"{name}: {amount}" for name, amount in view["resources"].items()))
     lines.extend(f"/{field['command']} … — {field['label']}" for field in view["fields"])
     return "\n".join(lines)
