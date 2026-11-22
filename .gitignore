@@ -224,3 +224,6 @@ __marimo__/
 
 # Local game saves
 living-world.sqlite3*
+
+# Local browser save
+living-world-web.sqlite3*
