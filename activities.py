@@ -2,6 +2,7 @@
 import random
 
 from loot import ITEMS, gear_bonuses, grant_item
+from workshop import active_effect, companion, count
 from world import advance_hero, combat_stats, fight_stats
 
 
@@ -82,6 +83,9 @@ def init_activities(db):
 def reward(db, hero_id, xp=0, coins=0, item=None):
     description = ""
     if xp or coins:
+        effect = active_effect(db, hero_id) if xp else None
+        if effect and effect["effect"] == "insight":
+            xp += xp // 2
         db.execute("UPDATE heroes SET xp = xp + ?, coins = coins + ? WHERE user_id = ?", (xp, coins, hero_id))
         description = f"+{xp} опыта, +{coins} монет"
     if item:
@@ -116,7 +120,7 @@ def inventory(db, hero, argument, equip=False):
     if not rows:
         return "Сумка пуста. Первые предметы можно найти в походе."
     lines = ["Сумка"]
-    slots = {"weapon": "оружие", "armor": "броня", "charm": "оберег"}
+    slots = {"weapon": "оружие", "armor": "броня", "charm": "оберег", "ring": "кольцо", "amulet": "амулет"}
     for row in rows:
         item = row["item"]
         name, slot, bonus = ITEMS[item]
@@ -147,7 +151,20 @@ def quest(db, hero_id, argument):
 def stats(db, hero):
     health, attack = combat_stats(hero)
     bonus_hp, bonus_attack = gear_bonuses(db, hero["user_id"])
-    return health + bonus_hp, attack + bonus_attack
+    effect = active_effect(db, hero["user_id"])
+    kind = effect["effect"] if effect else None
+    trophies = db.execute(
+        "SELECT COUNT(*) FROM settlement_claims WHERE user_id = ? AND prize LIKE 'trophy:%'", (hero["user_id"],)
+    ).fetchone()[0]
+    pet = companion(db, hero["user_id"])
+    if pet:
+        if pet["kind"] == "wolf":
+            bonus_hp += 2 * pet["rank"]
+        else:
+            bonus_attack += pet["rank"]
+    return (health + bonus_hp + trophies + 2 * count(db, hero["user_id"], "training:health") +
+            (5 if kind == "ward" else 0),
+            attack + bonus_attack + count(db, hero["user_id"], "training:attack") + (2 if kind == "might" else 0))
 
 
 def numeric_id(value):
@@ -212,8 +229,11 @@ def raid(db, hero, argument, now):
     close_raid(db, room_id)
     if not fight_stats(total_hp, total_attack, random, 16 + 13 * count, 6 * count):
         return "Колосс выдержал атаку. Отряд отступил. Можно собрать новый отряд."
+    from guilds import contribute
+
     for member in members:
         member_id = member["hero_id"]
+        contribute(db, member_id, now, 6)
         db.execute("INSERT INTO raid_victory VALUES (?, ?) ON CONFLICT (hero_id) DO UPDATE SET day = excluded.day", (member_id, day))
         prize = reward(db, member_id, 30, 25, "star")
     return f"Каменный колосс побеждён. Каждый из {count} участников получает {prize}."

@@ -6,11 +6,13 @@ const statusLine = document.querySelector("#status");
 const notice = document.querySelector("#notice");
 const sections = {
   camp: "Поселение", story: "История", journey: "Походы", hero: "Герой", work: "Занятия",
-  journal: "Журнал", company: "Отряд",
+  journal: "Журнал", company: "Отряд", town: "Город",
 };
 let game;
 let busy = false;
 let noticeTimer;
+let townPage;
+let townRequest = 0;
 
 function make(tag, options = {}, ...children) {
   const element = document.createElement(tag);
@@ -51,10 +53,10 @@ function grid(...tiles) { return make("div", { class: "grid" }, ...tiles); }
 function actions(...buttons) { return make("div", { class: "actions" }, ...buttons); }
 function heading(text) { return make("h2", {}, text); }
 
-function inputForm(fieldLabel, submit, command, numeric = false) {
+function inputForm(fieldLabel, submit, command, numeric = false, limit = 24) {
   const field = make("input", {
     placeholder: fieldLabel, "aria-label": fieldLabel, required: "",
-    maxlength: numeric ? 18 : 24, autocomplete: "off", inputmode: numeric ? "numeric" : "text",
+    maxlength: numeric ? 18 : limit, autocomplete: "off", inputmode: numeric ? "numeric" : "text",
     pattern: numeric ? "[0-9]+" : null,
   });
   const form = make("form", {}, field, make("button", { class: "action primary", type: "submit" }, submit));
@@ -90,8 +92,13 @@ async function perform(command) {
   try {
     const response = await request(command);
     game = response.state;
+    if (response.town) {
+      townPage = response.town;
+      if (townSection() !== townPage.section) location.hash = townPage.section ? `#town-${townPage.section}` : "#town";
+    }
     if (command?.startsWith("/adventure_") && game.encounter) location.hash = "#journey";
     render();
+    if (command?.startsWith("/create ") && townSection() !== null) openTown();
     const openedScreen = (game.encounter && command?.startsWith("/adventure_"))
       || (game.practice && ["/practice_scout", "/practice_herbalist"].includes(command));
     if (response.message && !openedScreen) {
@@ -112,6 +119,62 @@ async function perform(command) {
   }
 }
 
+async function profileRequest(operation, key) {
+  const response = await fetch("/api/profile", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ operation, key }),
+  });
+  if (!response.ok) throw new Error("Не удалось открыть профиль.");
+  const result = await response.json();
+  if (result.error) throw new Error(result.error);
+  return result;
+}
+
+function profilePanel() {
+  const exportButton = make("button", { type: "button", class: "action" }, "Создать ключ переноса");
+  const key = make("input", { readonly: "", hidden: "", "aria-label": "Одноразовый ключ переноса" });
+  exportButton.addEventListener("click", async () => {
+    exportButton.disabled = true;
+    try {
+      const result = await profileRequest("issue");
+      key.hidden = false;
+      key.value = result.key;
+      key.focus();
+      key.select();
+    } catch (error) {
+      showNotice(error.message);
+    } finally {
+      exportButton.disabled = false;
+    }
+  });
+  return make("section", { class: "panel" },
+    make("p", {}, "Одноразовый ключ переносит героя в пустой профиль браузера на этом сервере. Храни его отдельно."),
+    actions(exportButton, key));
+}
+
+function restoreForm() {
+  const key = make("input", { required: "", maxlength: 48, pattern: "[a-f0-9]{48}",
+    autocomplete: "off", placeholder: "Ключ героя", "aria-label": "Ключ героя" });
+  const submit = make("button", { type: "submit", class: "action" }, "Перенести героя");
+  const form = make("form", {}, key, submit);
+  form.addEventListener("submit", async event => {
+    event.preventDefault();
+    submit.disabled = true;
+    try {
+      const result = await profileRequest("restore", key.value);
+      game = result.state;
+      location.hash = "#hero";
+      render();
+      showNotice("Герой перенесён.");
+    } catch (error) {
+      showNotice(error.message);
+    } finally {
+      submit.disabled = false;
+    }
+  });
+  return form;
+}
+
 function camp() {
   return [
     banner("village", "Поселение у леса", "Снарядись, выбери путь и возвращайся сюда между походами."),
@@ -124,7 +187,8 @@ function camp() {
     grid(tile("misty-forest", "В поход", "Шесть локаций и пошаговая охота", "#journey"),
       tile("bag", "К герою", "Характеристики и снаряжение", "#hero"),
       tile("quests", "К доске заданий", "Поговорить с Мирой или Орином", "#company"),
-      tile("patrol", "Выбрать занятие", "Герой продолжит путь в твоё отсутствие", "#work")),
+      tile("patrol", "Выбрать занятие", "Герой продолжит путь в твоё отсутствие", "#work"),
+      tile("smithy", "Городские занятия", "Ремесло, добыча и соревнования", "#town")),
   ];
 }
 
@@ -213,7 +277,7 @@ function journeys() {
 
 function heroPage() {
   const hero = game.hero;
-  const slots = { armor: "Броня", charm: "Оберег", weapon: "Оружие" };
+  const slots = { armor: "Броня", charm: "Оберег", weapon: "Оружие", ring: "Кольцо", amulet: "Амулет" };
   return [
     banner("hero", hero.name, `Уровень ${hero.level} · Здоровье ${hero.hp} · Атака ${hero.attack}`),
     make("section", { class: "panel battle" }, metre("Опыт до следующего уровня", hero.xp % 30, 30),
@@ -225,6 +289,8 @@ function heroPage() {
     heading("Профессии"),
     grid(Object.entries(game.professions).map(([key, name]) => tile(key, name,
       `Очков навыка: ${hero[key]} · Тренировка за 5 монет`, `/train_${key}`))),
+    heading("Профиль браузера"),
+    profilePanel(),
   ];
 }
 
@@ -295,6 +361,48 @@ function company() {
   ];
 }
 
+function townSection() {
+  const found = /^#town(?:-([a-z]+))?$/.exec(location.hash);
+  if (!found) return null;
+  return game?.townSections?.includes(found[1]) ? found[1] : "";
+}
+
+async function openTown() {
+  const section = townSection();
+  if (section === null || !game?.hero) return;
+  const requestId = ++townRequest;
+  try {
+    const response = await request(section ? `/town ${section}` : "/town");
+    if (requestId !== townRequest || townSection() !== section) return;
+    game = response.state;
+    townPage = response.town;
+    render();
+  } catch (error) {
+    showNotice(error.message);
+  }
+}
+
+function townScreen(section) {
+  if (!townPage || townPage.section !== section) {
+    return [make("p", { role: "status" }, "Загрузка городских занятий…")];
+  }
+  if (!section) {
+    return [banner(townPage.art, "Городские занятия", townPage.text),
+      heading("Куда заглянуть"),
+      grid(townPage.buttons.map(item => tile(item.art, item.label, "", `#town-${item.command.split(" ")[1]}`)))];
+  }
+  const text = townPage.text.split("\n").filter(Boolean);
+  return [
+    banner(townPage.art, townPage.title, text[0] || ""),
+    make("section", { class: "panel battle" },
+      ...text.slice(1).map(line => make("p", {}, line)),
+      actions(townPage.buttons.map(item => button(item.label, `/${item.command}`)),
+        button("Обновить", `/town ${section}`),
+        make("a", { class: "action", href: "#town" }, "Все городские занятия")),
+      townPage.fields.map(field => inputForm(field.label, "Отправить", `/${field.command}`, false, 200))),
+  ];
+}
+
 function render() {
   view.removeAttribute("aria-busy");
   navigation.hidden = !game.hero;
@@ -302,25 +410,27 @@ function render() {
     statusLine.textContent = "";
     view.replaceChildren(banner("village", "Живой мир", "Твоя история начинается у границы Туманного леса."),
       make("section", { class: "panel battle" }, make("h2", {}, "Создай героя"),
-        inputForm("Имя героя", "Войти в мир", "/create")));
+        inputForm("Имя героя", "Войти в мир", "/create"), restoreForm()));
     return;
   }
   const page = location.hash.slice(1);
   const region = page.startsWith("route-") ? game.routes.find(route => route.key === page.slice(6)) : null;
-  const current = region ? "journey" : Object.hasOwn(sections, page) ? page : "camp";
+  const town = townSection();
+  const current = town !== null ? "town" : region ? "journey" : Object.hasOwn(sections, page) ? page : "camp";
   navigation.replaceChildren(...Object.entries(sections).map(([key, label]) =>
     make("a", { href: `#${key}`, "aria-current": key === current ? "page" : null }, label)));
   statusLine.textContent = `${game.hero.name} · ур. ${game.hero.level} · ${game.hero.coins} монет`;
   const pages = { camp, story: storyPage, journey: journeys, hero: heroPage, work, journal, company };
-  view.replaceChildren(...(region ? regionPage(region) : pages[current]()));
+  view.replaceChildren(...(town !== null ? townScreen(town) : region ? regionPage(region) : pages[current]()));
 }
 
 window.addEventListener("hashchange", () => {
   notice.hidden = true;
   if (game) render();
+  openTown();
   window.scrollTo(0, 0);
 });
-request().then(response => { game = response.state; render(); }).catch(error => {
+request().then(response => { game = response.state; render(); openTown(); }).catch(error => {
   view.removeAttribute("aria-busy");
   view.replaceChildren(make("p", {}, error.message),
     make("a", { class: "action", href: "/" }, "Перезагрузить"));

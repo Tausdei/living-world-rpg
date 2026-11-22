@@ -8,6 +8,7 @@ import activities
 import campaign
 import fieldwork
 import practice_games
+import town
 from adventures import PROFESSIONS, ROUTES, ROUTE_MENU, choose, encounter, init_adventures, region
 from art_catalog import GALLERY, TITLES
 from world import advance_hero, init_world, offline, schedule_hero
@@ -18,6 +19,7 @@ COMMANDS = {
     **activities.COMMANDS,
     "start": "Команды игры",
     "story": "Текущая глава и её цели",
+    "town": "Пещера, кузница, турниры и общение",
     "story_claim": "Завершить главу",
     "region": "Описание места перед походом",
     "offline": "Фоновое занятие героя",
@@ -62,6 +64,7 @@ HELP = """Живой мир
 /create Имя — создать героя
 /hero — уровень, опыт и монеты
 /story — глава, цели и награда
+/town — пещера, кузница, турниры и общение
 /journal — что случилось с героем
 /professions — навыки
 /train_scout или /train_herbalist — обучение
@@ -113,6 +116,7 @@ def connect(path):
     init_adventures(db)
     practice_games.init_practice(db)
     campaign.init_campaign(db)
+    town.init_town(db)
     return db
 
 
@@ -168,6 +172,11 @@ def play(db, user_id, message, bot_name=None):
     if hero is None:
         return "Сначала создай героя: /create Имя"
 
+    if command == "/town":
+        result = town.handle(db, hero, argument, now)
+        current = db.execute("SELECT * FROM heroes WHERE user_id = ?", (user_id,)).fetchone()
+        text = town.town_text(town.panel(db, current, argument, now))
+        return f"{result}\n\n{text}" if result else text
     if command in {"/story", "/story_claim"}:
         return campaign.story(db, user_id, argument if command == "/story_claim" else None)
     if command in {"/bag", "/equip"}:

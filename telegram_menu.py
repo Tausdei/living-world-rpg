@@ -1,5 +1,8 @@
 """Inline navigation and illustrated responses for Telegram."""
 import re
+import time
+
+import town
 
 from activities import QUESTS
 from loot import ITEMS
@@ -13,6 +16,7 @@ from campaign import CHAPTER_KEYS, story_state
 
 MENU = (
     (("История", "story"), ("Герой", "hero"), ("Походы", "adventure")),
+    (("Поселение", "town"),),
     (("Сумка", "bag"), ("Квесты", "npc"), ("Журнал", "journal")),
     (("В отсутствие", "offline"), ("Мини-игры", "practice"), ("Галерея", "gallery")),
 )
@@ -46,6 +50,8 @@ def callback_command(db, sender_id, data):
     kind, _, key = action.partition(":")
     if (kind == "gallery" and key in GALLERY) or (kind == "art" and key in TITLES):
         return f"/{kind} {key}", None
+    if re.fullmatch(r"town(?::[a-z0-9_]{1,16}){1,3}", action):
+        return "/" + action.replace(":", " "), None
     step = step_command(db, sender_id, action)
     if step is not None:
         return step
@@ -84,7 +90,7 @@ def journal_illustrations(db, user_id):
 
 
 def present(db, user_id, update_id, reply, command, argument, route_before=None, subject_before=None):
-    hero = db.execute("SELECT route FROM heroes WHERE user_id = ?", (user_id,)).fetchone()
+    hero = db.execute("SELECT * FROM heroes WHERE user_id = ?", (user_id,)).fetchone()
     route = hero["route"] if hero else None
     if route and command in {"/adventure", "/choose"} and reply.endswith(encounter(db, user_id, route)):
         index, scene, prepared = current_scene(db, user_id, route)
@@ -112,6 +118,12 @@ def present(db, user_id, update_id, reply, command, argument, route_before=None,
         )
         return controls(rows), "village"
 
+    if command == "/town" and hero:
+        page = town.panel(db, hero, argument, int(time.time()))
+        rows = [((item["label"], item["command"].replace(" ", ":")),) for item in page["buttons"]]
+        if page["section"]:
+            rows.append((("Поселение", "town"),))
+        return controls([*rows, BACK]), page["art"]
     if command in {"/story", "/story_claim"} and hero:
         current = story_state(db, user_id)["current"]
         story_rows = []

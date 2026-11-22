@@ -10,6 +10,8 @@ ITEMS = {
     "cloak": ("Плащ путника", "armor", 6),
     "fang": ("Волчий клык", "charm", 3),
     "lantern": ("Фонарь духов", "charm", 5),
+    "ring": ("Кольцо дозора", "ring", 1),
+    "amulet": ("Амулет искателей", "amulet", 2),
 }
 
 
@@ -23,10 +25,21 @@ def grant_item(db, hero_id, item):
 
 def gear_bonuses(db, hero_id):
     health = attack = 0
-    for row in db.execute("SELECT item FROM equipped WHERE hero_id = ?", (hero_id,)):
+    worn = set()
+    for row in db.execute("""
+        SELECT equipped.item, COALESCE(sharpening, 0) + COALESCE(rune, 0) + COALESCE(stars, 0) AS increase
+        FROM equipped LEFT JOIN gear_upgrades
+        ON equipped.hero_id = gear_upgrades.user_id AND equipped.item = gear_upgrades.item
+        WHERE equipped.hero_id = ?
+    """, (hero_id,)):
+        worn.add(row["item"])
         _, slot, bonus = ITEMS[row["item"]]
+        bonus += row["increase"]
         if slot == "weapon":
             attack += bonus
         else:
             health += bonus
+    if {"spear", "vest", "ring"} <= worn:
+        health += 3
+        attack += 2
     return health, attack

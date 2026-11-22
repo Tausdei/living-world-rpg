@@ -1,9 +1,12 @@
 """Local browser entry point for Living World, using the existing RPG rules."""
+import hashlib
 import json
 import os
 import re
 import secrets
 import time
+
+import town
 from contextlib import closing
 from http.cookies import CookieError, SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -31,6 +34,7 @@ STATIC = {
 ROOT = Path(__file__).resolve().parent
 COOKIE = "living_world"
 SESSION = re.compile(r"[a-f0-9]{40}")
+RECOVERY = re.compile(r"[a-f0-9]{48}")
 
 
 def connect_web(path):
@@ -39,6 +43,12 @@ def connect_web(path):
         CREATE TABLE IF NOT EXISTS browser_players (
             user_id INTEGER PRIMARY KEY AUTOINCREMENT,
             token TEXT NOT NULL UNIQUE
+        )
+    """)
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS profile_recovery (
+            user_id INTEGER PRIMARY KEY REFERENCES browser_players(user_id),
+            digest BLOB NOT NULL UNIQUE
         )
     """)
     return db
@@ -95,6 +105,7 @@ def state(db, user_id):
         "battle": battle, "practice": practice_view(practice) if practice else None,
         "job": current_job(db, user_id), "encounter": encounter,
         "story": story_state(db, user_id),
+        "townSections": list(town.SECTIONS),
         "routes": [{"key": key, "name": area.title, "art": area.art,
                     "level": area.level, "scenes": len(area.scenes),
                     "description": REGIONS[key], "difficulty": area.difficulty} for key, area in ROUTES.items()],
@@ -125,13 +136,55 @@ class GameHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(payload)
 
-    def game_response(self, command=None):
+    def cookie_token(self):
         jar = SimpleCookie()
         try:
             jar.load(self.headers.get("Cookie", ""))
         except CookieError:
             jar.clear()
         token = jar[COOKIE].value if COOKIE in jar else None
+        return token if token and SESSION.fullmatch(token) else None
+
+    def profile_response(self, body):
+        operation = body.get("operation") if isinstance(body, dict) else None
+        key = body.get("key", "") if isinstance(body, dict) else ""
+        if operation not in ("issue", "restore") or not isinstance(key, str):
+            self.send_error(400)
+            return
+        cookie = None
+        with closing(connect_web(self.server.database)) as db, db:
+            db.execute("BEGIN IMMEDIATE")
+            current = db.execute("""
+                SELECT heroes.user_id FROM browser_players JOIN heroes USING (user_id)
+                WHERE browser_players.token = ?
+            """, (self.cookie_token(),)).fetchone()
+            if operation == "issue" and current:
+                secret = secrets.token_hex(24)
+                digest = hashlib.sha256(secret.encode()).digest()
+                db.execute("""
+                    INSERT INTO profile_recovery VALUES (?, ?)
+                    ON CONFLICT(user_id) DO UPDATE SET digest = excluded.digest
+                """, (current["user_id"], digest))
+                result = {"key": secret}
+            elif operation == "issue":
+                result = {"error": "Сначала создай героя."}
+            elif current:
+                result = {"error": "Перенос возможен в пустом профиле браузера."}
+            else:
+                digest = hashlib.sha256(key.encode()).digest() if RECOVERY.fullmatch(key) else None
+                profile = db.execute("SELECT user_id FROM profile_recovery WHERE digest = ?", (digest,)).fetchone()
+                if profile:
+                    cookie = secrets.token_hex(20)
+                    db.execute("DELETE FROM profile_recovery WHERE user_id = ?", (profile["user_id"],))
+                    db.execute("UPDATE browser_players SET token = ? WHERE user_id = ?",
+                               (cookie, profile["user_id"]))
+                    result = {"state": state(db, profile["user_id"])}
+                else:
+                    result = {"error": "Ключ не найден или уже использован."}
+        self.respond(json.dumps(result, ensure_ascii=False).encode(), "application/json; charset=utf-8", cookie)
+
+    def game_response(self, command=None):
+        token = self.cookie_token()
         with closing(connect_web(self.server.database)) as db, db:
             db.execute("BEGIN IMMEDIATE")
             user_id, new_cookie = player(db, token)
@@ -141,6 +194,14 @@ class GameHandler(BaseHTTPRequestHandler):
             else:
                 advance_hero(db, user_id, int(time.time()))
             result = {"state": state(db, user_id), "message": message}
+            if command and (command == "/town" or command.startswith("/town ")):
+                hero = db.execute("SELECT * FROM heroes WHERE user_id = ?", (user_id,)).fetchone()
+                if hero:
+                    section = command.removeprefix("/town").strip()
+                    view = town.panel(db, hero, section, int(time.time()))
+                    result["town"] = view
+                    prefix, separator, _ = (message or "").partition("\n\n")
+                    result["message"] = prefix if separator else None
         self.respond(json.dumps(result, ensure_ascii=False).encode(), "application/json; charset=utf-8", new_cookie)
 
     def do_GET(self):
@@ -160,7 +221,7 @@ class GameHandler(BaseHTTPRequestHandler):
             self.send_error(404)
 
     def do_POST(self):
-        if self.path != "/api/action":
+        if self.path not in {"/api/action", "/api/profile"}:
             self.send_error(404)
             return
         origin = self.headers.get("Origin")
@@ -175,8 +236,11 @@ class GameHandler(BaseHTTPRequestHandler):
             if not 0 < size <= 1024:
                 raise ValueError
             body = json.loads(self.rfile.read(size))
+            if self.path == "/api/profile":
+                self.profile_response(body)
+                return
             command = body["command"]
-            if not isinstance(command, str) or not re.fullmatch(r"/[a-z0-9_]+(?: [^\r\n]{1,160})?", command):
+            if not isinstance(command, str) or not re.fullmatch(r"/[a-z0-9_]+(?: [^\r\n]{1,240})?", command):
                 raise ValueError
         except (ValueError, KeyError, TypeError):
             self.send_error(400)
