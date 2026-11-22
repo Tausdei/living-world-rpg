@@ -2,7 +2,6 @@
 
 const view = document.querySelector("#view");
 const navigation = document.querySelector("#navigation");
-const sectionMenu = document.querySelector("#section-menu");
 const statusLine = document.querySelector("#status");
 const notice = document.querySelector("#notice");
 const navigationItems = [
@@ -482,7 +481,7 @@ function startCaveTimer() {
 function render() {
   clearInterval(caveTimer);
   view.removeAttribute("aria-busy");
-  sectionMenu.hidden = !game.hero;
+  navigation.hidden = !game.hero;
   statusLine.hidden = !game.hero;
   if (!game.hero) {
     view.replaceChildren(banner("village", "Живой мир", "Твоя история начинается у границы Туманного леса."),
@@ -508,15 +507,11 @@ function render() {
   startCaveTimer();
 }
 
-navigation.addEventListener("click", event => {
-  if (event.target.closest("a")) sectionMenu.open = false;
-});
 document.querySelector(".skip-link").addEventListener("click", event => {
   event.preventDefault();
   focusTitle();
 });
 window.addEventListener("hashchange", () => {
-  sectionMenu.open = false;
   notice.hidden = true;
   window.scrollTo(0, 0);
   if (!game) return;
