@@ -18,11 +18,19 @@ EVENTS = {
     "caravan": ("Караванщики наградили тебя за охрану перевала.", 8, 7, 1, 0, "cloak", None),
     "relic": ("У древнего алтаря ты зарисовал руну и отыскал подношение.", 8, 5, 1, 0, None, None),
     "fireflies": ("Светляки привели тебя к редким лекарственным растениям.", 7, 3, 0, 1, None, None),
+    "ferry": ("Ты освободил паром ото льда. Переправщик поделился выручкой.", 7, 5, 1, 0, None, None),
+    "raven": ("Ты перевязал крыло ворона с донесением и передал письмо дозору.", 7, 4, 0, 1, None, None),
+    "apiary": ("Пасечник заплатил тебе за помощь с травами для ульев.", 6, 5, 0, 1, None, None),
+    "wheelwright": ("Ты укрепил колесо в старой мастерской и получил плату за ремонт.", 6, 6, 1, 0, None, None),
+    "snare": ("Ты разрезал забытый силок и выпустил кабана.", 7, 3, 1, 0, None, None),
+    "monastery": ("В горном монастыре ты приготовил отвары для уставших паломников.", 8, 4, 0, 1, None, None),
+    "fungus": ("Светящиеся грибы вывели тебя из заброшенной пещеры.", 8, 4, 0, 1, None, None),
+    "meteor": ("На месте падения звезды ты нашёл искрящуюся руду.", 9, 5, 1, 0, "star", None),
     "camp": ("У костра ты разобрал припасы и подписал лекарственные сборы.", 4, 2, 0, 1, None, None),
 }
 POOLS = {
     "roam": tuple(EVENTS),
-    "patrol": ("wolf", "wolf", "ghost", "traveler", "caravan", "chest", "storm"),
-    "forage": ("herbs", "herbs", "fireflies", "fireflies", "storm", "relic"),
-    "camp": ("camp", "camp", "camp", "herbs", "merchant"),
+    "patrol": ("wolf", "wolf", "ghost", "traveler", "caravan", "chest", "storm", "ferry", "raven", "snare", "meteor"),
+    "forage": ("herbs", "herbs", "fireflies", "fireflies", "storm", "relic", "apiary", "fungus", "monastery"),
+    "camp": ("camp", "camp", "camp", "herbs", "merchant", "wheelwright", "monastery", "apiary"),
 }

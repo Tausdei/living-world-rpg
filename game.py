@@ -6,6 +6,8 @@ from datetime import UTC, datetime
 
 import activities
 import fieldwork
+import practice_games
+from adventures import PROFESSIONS, ROUTES, ROUTE_MENU, choose, encounter, init_adventures
 from art_catalog import GALLERY, TITLES
 from world import advance_hero, init_world, offline, schedule_hero
 from world_events import JOBS
@@ -18,7 +20,7 @@ COMMANDS = {
     "hunt": "Пошаговая охота",
     "turn": "Действие текущего боя",
     "practice": "Мини-игры профессий",
-    "practice_answer": "Ответ в мини-игре",
+    "practice_answer": "Действие в мини-игре",
     "create": "Создать персонажа",
     "journal": "Журнал событий героя",
     "hero": "Посмотреть персонажа",
@@ -33,16 +35,15 @@ SHORTCUTS = {
     **{f"offline_{job}": ("offline", job) for job in JOBS},
     **{f"hunt_{enemy}": ("hunt", enemy) for enemy in fieldwork.ENEMIES},
     **{f"turn_{action}": ("turn", action) for action in fieldwork.HUNT_ACTIONS},
-    **{f"practice_{skill}": ("practice", skill) for skill in fieldwork.PRACTICES},
-    **{f"practice_answer_{choice}": ("practice_answer", choice) for choice in ("1", "2", "3", "cancel")},
-    "adventure_forest": ("adventure", "forest"),
-    "adventure_ruins": ("adventure", "ruins"),
+    **{f"practice_{skill}": ("practice", skill) for skill in practice_games.SKILLS},
+    **{f"practice_answer_{choice}": ("practice_answer", choice) for choice in practice_games.ACTIONS},
+    **{f"adventure_{key}": ("adventure", key) for key in ROUTES},
     "choose_1": ("choose", "1"),
     "choose_2": ("choose", "2"),
+    "choose_leave": ("choose", "leave"),
     "train_scout": ("train", "scout"),
     "train_herbalist": ("train", "herbalist"),
-    "quest_forest": ("quest", "forest"),
-    "quest_keeper": ("quest", "keeper"),
+    **{f"quest_{key}": ("quest", key) for key in activities.QUESTS},
     "raid_open": ("raid", "open"),
     "raid_start": ("raid", "start"),
     "raid_leave": ("raid", "leave"),
@@ -68,24 +69,6 @@ HELP = """Живой мир
 /hunt — пошаговые бои
 /practice — мини-игры профессий
 /gallery — иллюстрации мира"""
-
-ROUTE_MENU = "/adventure_forest — Туманный лес\n/adventure_ruins — Старая башня (с уровня 2)"
-
-PROFESSIONS = {"scout": "Следопыт", "herbalist": "Травник"}
-
-ROUTES = {
-    "forest": (
-        "За мостом затопило тропу. На берегу видны свежие следы.",
-        ("scout", "Пойти по следам в обход", 12),
-        ("herbalist", "Собрать лунную мяту у воды", 9),
-    ),
-    "ruins": (
-        "В сторожевой башне обрушилась лестница. Из-под плит тянет горьким дымом.",
-        ("scout", "Пробраться по обходной галерее", 20),
-        ("herbalist", "Приготовить отвар и спуститься через дым", 17),
-    ),
-}
-
 
 def connect(path):
     db = sqlite3.connect(path)
@@ -120,16 +103,9 @@ def connect(path):
     init_world(db)
     activities.init_activities(db)
     fieldwork.init_fieldwork(db)
+    init_adventures(db)
+    practice_games.init_practice(db)
     return db
-
-
-def encounter(route):
-    description, *options = ROUTES[route]
-    choices = "\n".join(
-        f"/choose_{number} — {label} ({PROFESSIONS[skill]})"
-        for number, (skill, label, _) in enumerate(options, 1)
-    )
-    return f"{description}\n{choices}"
 
 
 def parse_command(message, bot_name=None):
@@ -192,9 +168,9 @@ def play(db, user_id, message, bot_name=None):
     if command == "/turn":
         return fieldwork.turn(db, hero, argument, now)
     if command == "/practice":
-        return fieldwork.practice(db, hero, argument, now)
+        return practice_games.practice(db, hero, argument, now)
     if command == "/practice_answer":
-        return fieldwork.answer(db, hero, argument, now)
+        return practice_games.answer(db, hero, argument, now)
     if command == "/raid":
         return activities.raid(db, hero, argument, now)
     if command == "/pvp":
@@ -234,34 +210,13 @@ def play(db, user_id, message, bot_name=None):
         if fieldwork.active_hunt(db, user_id):
             return "Сначала закончи текущий бой. /hunt"
         if route:
-            return encounter(route)
+            return encounter(db, user_id, route)
         if argument not in ROUTES:
             return ROUTE_MENU
-        if argument == "ruins" and level < 2:
-            return "Старая башня откроется на уровне 2."
+        place = ROUTES[argument]
+        if level < place.level:
+            return f"«{place.title}» откроется на уровне {place.level}."
         db.execute("UPDATE heroes SET route = ? WHERE user_id = ?", (argument, user_id))
-        return encounter(argument)
+        return encounter(db, user_id, argument)
 
-    if not route:
-        return "Сначала выбери маршрут. /adventure"
-    if argument not in {"1", "2"}:
-        return encounter(route)
-    skill, _, reward = ROUTES[route][int(argument)]
-    difficulty = 0 if route == "forest" else 2
-    success = hero[skill] // 3 >= difficulty
-    xp = 15 if success else 5
-    coins = reward if success else 2
-    db.execute(
-        f"UPDATE heroes SET route = NULL, xp = xp + ?, coins = coins + ?, {skill} = {skill} + 1 WHERE user_id = ?",
-        (xp, coins, user_id),
-    )
-    loot = ""
-    if success:
-        if route == "forest":
-            activities.record_objective(db, user_id, "forest", 2)
-        item = "blade" if route == "ruins" else ("knife" if skill == "scout" else "charm")
-        loot = " " + activities.reward(db, user_id, item=item) + ". /bag"
-    outcome = "Ты вернулся с добычей." if success else "Не хватило навыка. Ты отступил и сберёг снаряжение."
-    new_level = 1 + (hero["xp"] + xp) // 30
-    promotion = f" Новый уровень: {new_level}." if new_level > level else ""
-    return f"{outcome} +{xp} опыта, +{coins} монет, +1 очко профессии «{PROFESSIONS[skill]}».{promotion}{loot}\n/adventure"
+    return choose(db, hero, argument)

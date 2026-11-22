@@ -1,6 +1,8 @@
 """Illustration keys and the player-facing gallery."""
 from pathlib import Path
 
+from activities import QUESTS
+from adventures import ROUTES
 from world_events import EVENTS
 
 
@@ -9,7 +11,7 @@ GALLERY = {
     "places": ("Места и сражения", {
         "village": "Поселение на границе леса",
         "misty-forest": "Туманный лес",
-        "old-tower": "Старая башня",
+        **{area.art: area.title for key, area in ROUTES.items() if key != "forest"},
         "ash-keeper": "Пепельный смотритель",
         "colossus": "Каменный колосс",
         "arena": "Дуэльный двор",
@@ -45,6 +47,14 @@ GALLERY = {
         "camp": "Работа у костра",
         "patrol": "Лесной дозор",
         "forage": "Сбор трав",
+        "ferry": "Замёрзшая переправа",
+        "raven": "Ворон с донесением",
+        "apiary": "Пасека",
+        "wheelwright": "Мастерская колёсника",
+        "snare": "Зверь в силке",
+        "monastery": "Приют в монастыре",
+        "fungus": "Грибная пещера",
+        "meteor": "Упавшая звезда",
     }),
     "items": ("Добыча и награды", {
         "knife": "Походный нож",
@@ -64,12 +74,12 @@ GALLERY = {
     }),
 }
 TITLES = {key: title for _, entries in GALLERY.values() for key, title in entries.items()}
-ROUTE_ART = {"forest": "misty-forest", "ruins": "old-tower"}
+ROUTE_ART = {key: area.art for key, area in ROUTES.items()}
 CHOICE_ART = {
     "forest": {"1": "forest-tracks", "2": "moon-mint"},
     "ruins": {"1": "tower-gallery", "2": "tower-decoction"},
 }
-QUEST_ART = {"forest": "mira", "keeper": "orin"}
+QUEST_ART = {key: "mira" if npc == "Дозорница Мира" else "orin" for key, (npc, *_) in QUESTS.items()}
 SCREEN_ART = {
     "/start": "village", "/help": "village", "/create": "hero", "/hero": "hero",
     "/adventure": "village", "/bag": "bag", "/npc": "quests", "/quest": "quests",
@@ -77,6 +87,11 @@ SCREEN_ART = {
     "/raid": "colossus", "/pvp": "arena", "/journal": "journal",
 }
 JOURNAL_ART = {event[0]: key for key, event in EVENTS.items()}
+
+
+def event_illustration(summary):
+    description = summary.partition(" +")[0]
+    return next((key for phrase, key in JOURNAL_ART.items() if phrase in description), None)
 
 
 def illustration_path(key):

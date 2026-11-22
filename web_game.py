@@ -10,10 +10,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from activities import stats
-from art_catalog import illustration_path
-from fieldwork import ENEMIES, HUNT_ACTIONS, active_hunt, active_practice, practice_question
-from game import PROFESSIONS, ROUTES, connect, play
+from activities import QUESTS, stats
+from adventures import ROUTES, current_scene
+from art_catalog import QUEST_ART, event_illustration, illustration_path
+from fieldwork import ENEMIES, HUNT_ACTIONS, active_hunt
+from game import PROFESSIONS, connect, play
+from practice_games import active_practice, practice_view
 from loot import ITEMS
 from world import advance_hero, current_job
 from world_events import JOBS
@@ -62,7 +64,6 @@ def state(db, user_id):
     hunt = active_hunt(db, user_id)
     practice = active_practice(db, user_id)
     battle = None
-    challenge = None
     if hunt:
         key = hunt["enemy"]
         battle = {
@@ -72,27 +73,35 @@ def state(db, user_id):
                         if key != "heal" or not hunt["used_heal"]],
         }
         battle.pop("token")
-    if practice:
-        prompt, choices, _ = practice_question(practice)
-        challenge = {
-            "prompt": prompt, "choices": choices, "step": practice["step"] + 1,
-            "score": practice["score"], "skill": practice["skill"],
-        }
     route = hero["route"]
+    encounter = None
+    if route:
+        area = ROUTES[route]
+        index, scene, prepared = current_scene(db, user_id, route)
+        encounter = {
+            "title": area.title, "art": area.art, "description": scene.description,
+            "choices": [option.title for option in scene.options],
+            "stage": index + 1, "total": len(area.scenes),
+            "required": max(0, area.difficulty - prepared) if index else None,
+        }
     return {
         "hero": {**dict(hero), "level": 1 + hero["xp"] // 30, "hp": hp, "attack": attack},
         "bag": [{"key": row["item"], "quantity": row["quantity"], "worn": row["worn"],
                  "name": ITEMS[row["item"]][0], "slot": ITEMS[row["item"]][1],
                  "bonus": ITEMS[row["item"]][2]} for row in inventory],
-        "battle": battle, "practice": challenge, "job": current_job(db, user_id),
-        "encounter": {"description": ROUTES[route][0], "choices": [option[1] for option in ROUTES[route][1:]]}
-        if route else None,
+        "battle": battle, "practice": practice_view(practice) if practice else None,
+        "job": current_job(db, user_id), "encounter": encounter,
+        "routes": [{"key": key, "name": area.title, "art": area.art,
+                    "level": area.level, "scenes": len(area.scenes)} for key, area in ROUTES.items()],
         "jobs": [{"key": key, "name": name, "description": description, "art": art}
                  for key, (name, description, art) in JOBS.items()],
         "enemies": [{"key": key, "name": data[0], "level": data[1], "art": "ash-keeper" if key == "keeper" else key}
                     for key, data in ENEMIES.items()],
         "professions": PROFESSIONS,
-        "journal": [dict(row) for row in db.execute("""
+        "quests": [{"key": key, "npc": npc, "description": text, "art": QUEST_ART[key],
+                    "title": ROUTES[key].title if key in ROUTES else "Пепельный смотритель"}
+                   for key, (npc, text, *_) in QUESTS.items()],
+        "journal": [{**dict(row), "art": event_illustration(row["summary"])} for row in db.execute("""
             SELECT occurred_at, summary FROM world_journal WHERE user_id = ?
             ORDER BY occurred_at DESC LIMIT 8
         """, (user_id,))],

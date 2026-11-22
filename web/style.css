@@ -45,3 +45,11 @@ progress{display:block;width:100%;height:12px;margin:.4rem 0 .7rem;accent-color:
 .notice button{position:absolute;right:.6rem;top:.45rem;background:transparent;color:var(--text);border:0;font-size:1.4rem;cursor:pointer}
 @media(max-width:620px){.masthead{min-height:62px}.masthead,#navigation,main{width:calc(100% - 1.25rem)}#navigation{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));padding-block:.55rem .75rem;gap:.2rem}#navigation a{display:grid;place-items:center;padding:.5rem .2rem;font-size:.86rem;text-align:center}.hero{min-height:270px}.grid{grid-template-columns:1fr 1fr}.tile{min-height:128px}.hero-content{padding:1.05rem}.brand{font-size:1.28rem}#status{font-size:.78rem}}
 @media(max-width:360px){.grid{grid-template-columns:1fr}.hero h1{font-size:2rem}}
+
+.trail{display:grid;grid-template-columns:repeat(5,1fr);gap:.25rem;width:min(100%,16rem);margin:.7rem 0}
+.trail span{display:grid;place-items:center;aspect-ratio:1;border:1px solid #506454;border-radius:.25rem;background:#30473a;font-weight:700}
+.trail .wall{background:#232924;color:#778679}
+.trail .water{background:#254b55;color:#b7e9f2}
+.trail .goal{background:#4f4129;color:#f1ce8e}
+.trail .player{background:var(--gold);color:#251e15}
+.event-card img{width:100%;aspect-ratio:1.6;object-fit:cover;border-radius:.45rem;margin-bottom:.5rem}

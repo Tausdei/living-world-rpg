@@ -91,12 +91,17 @@ async function perform(command) {
     const response = await request(command);
     game = response.state;
     render();
-    if (response.message) {
-      const text = command?.startsWith("/turn_") && game.battle
-        ? response.message.split("\n", 1)[0]
-        : response.message;
+    const openedScreen = (game.encounter && command?.startsWith("/adventure_"))
+      || (game.practice && ["/practice_scout", "/practice_herbalist"].includes(command));
+    if (response.message && !openedScreen) {
+      const hasLiveActions = (game.battle && command?.startsWith("/turn_"))
+        || (game.encounter && command?.startsWith("/choose_"))
+        || (game.practice && command?.startsWith("/practice_answer_"));
+      const text = hasLiveActions ? response.message.split("\n", 1)[0] : response.message;
       const cleaned = text.replace(/(^|[\s·])\/[a-z][a-z0-9_]*/g, "$1").replace(/\s*·\s*(?=\n|$)/gm, "").trim();
       if (cleaned) showNotice(cleaned);
+    } else if (openedScreen) {
+      notice.hidden = true;
     }
   } catch (error) {
     showNotice(error.message);
@@ -110,7 +115,7 @@ function camp() {
   return [
     banner("village", "Поселение у леса", "Снарядись, выбери путь и возвращайся сюда между походами."),
     heading("Куда пойти"),
-    grid(tile("misty-forest", "В поход", "Лес, башня и пошаговая охота", "#journey"),
+    grid(tile("misty-forest", "В поход", "Шесть локаций и пошаговая охота", "#journey"),
       tile("bag", "К герою", "Характеристики и снаряжение", "#hero"),
       tile("quests", "К доске заданий", "Поговорить с Мирой или Орином", "#company"),
       tile("patrol", "Выбрать занятие", "Герой продолжит путь в твоё отсутствие", "#work")),
@@ -135,16 +140,19 @@ function journeys() {
   }
   if (encounter) {
     return [
-      banner(game.hero.route === "forest" ? "misty-forest" : "old-tower",
-        game.hero.route === "forest" ? "Туманный лес" : "Старая башня", encounter.description),
-      actions(encounter.choices.map((choice, i) => button(choice, `/choose_${i + 1}`, i === 0))),
+      banner(encounter.art, encounter.title, encounter.description),
+      make("section", { class: "panel battle" },
+        encounter.total > 1 ? make("p", {}, `Этап ${encounter.stage}/${encounter.total}`) : null,
+        encounter.required !== null ? make("p", {}, `Требуемый ранг профессии: ${encounter.required}`) : null,
+        actions(encounter.choices.map((choice, i) => button(choice, `/choose_${i + 1}`, i === 0)),
+          button("Вернуться в поселение", "/choose_leave"))),
     ];
   }
   return [
     banner("misty-forest", "Походы", "В лесу важны внимательность и подготовка. Выбери маршрут или противника."),
     heading("Маршруты"),
-    grid(tile("misty-forest", "Туманный лес", "С уровня 1", "/adventure_forest"),
-      tile("old-tower", "Старая башня", "С уровня 2", "/adventure_ruins")),
+    grid(game.routes.map(route => tile(route.art, route.name,
+      `С уровня ${route.level}${route.scenes > 1 ? " · 2 этапа" : ""}`, `/adventure_${route.key}`))),
     heading("Пошаговая охота"),
     grid(game.enemies.map(enemy => tile(enemy.art, enemy.name, `С уровня ${enemy.level}`, `/hunt_${enemy.key}`))),
   ];
@@ -167,6 +175,28 @@ function heroPage() {
   ];
 }
 
+function practicePanel(practice) {
+  const legend = {
+    "#": ["wall", "Преграда", "■"], "@": ["player", "Герой", "✧"],
+    "X": ["goal", "Цель", "✦"], "~": ["water", "Топь", "≈"],
+  };
+  const board = practice.board
+    ? make("div", { class: "trail", role: "img", "aria-label": practice.board.join(", ") },
+      practice.board.flatMap(row => [...row].map(cell => {
+        const [style, title, symbol] = legend[cell] || ["ground", "Тропа", "·"];
+        return make("span", { class: style, title, "aria-hidden": "true" }, symbol);
+      })))
+    : make("div", { class: "meters" },
+      metre(`Температура, цель ${practice.target}`, practice.heat, 6),
+      metre("Готовые порции", practice.progress, 3));
+  return make("section", { class: "panel" }, make("h3", {}, practice.title),
+    make("p", {}, practice.description),
+    make("p", {}, `Осталось ходов: ${practice.remaining}${practice.stock === undefined ? "" : ` · Сырьё: ${practice.stock}`}`),
+    board,
+    actions(practice.actions.map(({key, label}) => button(label, `/practice_answer_${key}`)),
+      button("Завершить", "/practice_answer_cancel")));
+}
+
 function work() {
   const practice = game.practice;
   return [
@@ -175,12 +205,9 @@ function work() {
     heading("Фоновое занятие"),
     grid(game.jobs.map(job => tile(job.art, job.name, job.description, `/offline_${job.key}`, game.job === job.key))),
     heading("Испытания профессий"),
-    practice ? make("section", { class: "panel" },
-      make("h3", {}, `Задание ${practice.step}/3`), make("p", {}, practice.prompt),
-      actions(practice.choices.map((answer, i) => button(answer, `/practice_answer_${i + 1}`)),
-        button("Завершить", "/practice_answer_cancel"))) :
-      grid(tile("scout-game", "Читать следы", "Испытание следопыта", "/practice_scout"),
-        tile("herbalist-game", "Подобрать травы", "Испытание травника", "/practice_herbalist")),
+    practice ? practicePanel(practice) :
+      grid(tile("scout-game", "Тропа по следам", "Проложи путь по карте", "/practice_scout"),
+        tile("herbalist-game", "Настой у котла", "Управляй огнём и добавляй порции", "/practice_herbalist")),
   ];
 }
 
@@ -189,7 +216,8 @@ function journal() {
   return [
     banner("journal", "Журнал героя", "Последние события, рассчитанные с учётом выбранного занятия."),
     actions(button("Обновить журнал")),
-    game.journal.length ? grid(game.journal.map(entry => make("article", { class: "panel" },
+    game.journal.length ? grid(game.journal.map(entry => make("article", { class: "panel event-card" },
+      entry.art ? image(entry.art) : null,
       make("time", {}, date.format(new Date(entry.occurred_at * 1000))), make("p", {}, entry.summary)))) :
       make("p", { class: "muted" }, "Первое фоновое событие появится примерно через 30 минут после создания героя."),
   ];
@@ -199,8 +227,8 @@ function company() {
   return [
     banner("colossus", "Квесты и отряд", "Выполняй поручения жителей или собери других героев для рейда."),
     heading("Поручения"),
-    grid(tile("mira", "Дозорница Мира", "Два успешных похода в лес", "/quest_forest"),
-      tile("orin", "Архивист Орин", "Победа над Пепельным смотрителем", "/quest_keeper")),
+    grid(game.quests.map(quest => tile(quest.art, quest.title,
+      `${quest.npc} · ${quest.description}`, `/quest_${quest.key}`))),
     heading("Совместная игра"),
     make("section", { class: "panel" }, make("h3", {}, "Рейд на Каменного колосса"),
       actions(button("Мой отряд", "/raid"), button("Создать отряд", "/raid_open"),

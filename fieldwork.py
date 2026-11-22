@@ -1,5 +1,4 @@
-"""Persistent turn-based hunts and profession challenges."""
-import json
+"""Persistent turn-based hunts and shared activity cooldowns."""
 import random
 from secrets import token_hex
 
@@ -22,20 +21,6 @@ ENEMIES = {
     "ghost": ("Курганный призрак", 3, 23, 4, 20, 12, "lantern"),
     "keeper": ("Пепельный смотритель", 2, 24, 4, 22, 20, "seal"),
 }
-PRACTICES = {
-    "scout": (
-        ("Какое животное оставляет раздвоенные отпечатки копыт?", "Кабан", "Волк", "Лисица"),
-        ("Какие следы свежее после дождя?", "Чёткие края без скопившейся воды", "Размытые края и лужа внутри", "Края заросли мхом"),
-        ("Чьи следы выдают длинные прыжки и две длинные задние лапы?", "Заяц", "Человек", "Кабан"),
-        ("Чтобы определить направление движения зверя, что осмотреть первым?", "Куда смотрят пальцы или копыта", "Цвет земли", "Высоту ближайшего дерева"),
-    ),
-    "herbalist": (
-        ("Для прохладного ароматного настоя нужны листья лунной мяты. Что взять?", "Зелёные листья с прохладным запахом", "Смолистую кору", "Сухие семена без запаха"),
-        ("Как сушить лекарственные листья, чтобы между ними проходил воздух?", "Разложить тонким слоем", "Сложить в закрытый мокрый мешок", "Утрамбовать в горшок"),
-        ("Что поможет отличить похожие растения у ручья?", "Проверить листья, стебель и цветки", "Посмотреть только на высоту", "Смешать всё в одной корзине"),
-        ("Что сделать с незнакомой травой перед приготовлением игрового настоя?", "Отложить и свериться с травником", "Добавить её первой", "Смешать с остальными"),
-    ),
-}
 
 
 def init_fieldwork(db):
@@ -51,14 +36,6 @@ def init_fieldwork(db):
             used_heal INTEGER NOT NULL,
             token TEXT NOT NULL
         );
-        CREATE TABLE IF NOT EXISTS practices (
-            user_id INTEGER PRIMARY KEY REFERENCES heroes(user_id),
-            skill TEXT NOT NULL,
-            questions TEXT NOT NULL,
-            step INTEGER NOT NULL,
-            score INTEGER NOT NULL,
-            token TEXT NOT NULL
-        );
         CREATE TABLE IF NOT EXISTS fieldwork_cooldowns (
             user_id INTEGER NOT NULL REFERENCES heroes(user_id),
             activity TEXT NOT NULL,
@@ -70,10 +47,6 @@ def init_fieldwork(db):
 
 def active_hunt(db, user_id):
     return db.execute("SELECT * FROM hunts WHERE user_id = ?", (user_id,)).fetchone()
-
-
-def active_practice(db, user_id):
-    return db.execute("SELECT * FROM practices WHERE user_id = ?", (user_id,)).fetchone()
 
 
 def wait_seconds(db, user_id, activity, now):
@@ -182,60 +155,3 @@ def turn(db, hero, action, now, rng=random):
         UPDATE hunts SET hp = ?, foe_hp = ?, turn = turn + 1, used_heal = ?, token = ? WHERE user_id = ?
     """, (hp, foe_hp, used_heal, token_hex(5), user_id))
     return log + "\n" + hunt_scene(active_hunt(db, user_id))
-
-
-def practice_question(state):
-    questions = json.loads(state["questions"])
-    index, order = questions[state["step"]]
-    prompt, *choices = PRACTICES[state["skill"]][index]
-    return prompt, [choices[position] for position in order], order.index(0) + 1
-
-
-def practice_scene(state):
-    prompt, labels, _ = practice_question(state)
-    rows = [f"Испытание {state['step'] + 1}/3 · верных ответов: {state['score']}", prompt]
-    rows.extend(f"/practice_answer_{number} — {label}" for number, label in enumerate(labels, 1))
-    return "\n".join(rows)
-
-
-def practice(db, hero, action, now, rng=random):
-    user_id = hero["user_id"]
-    state = active_practice(db, user_id)
-    if state:
-        return practice_scene(state)
-    if action not in PRACTICES:
-        return "Мини-игры профессий\n/practice_scout — чтение следов\n/practice_herbalist — травник"
-    remaining = wait_seconds(db, user_id, action, now)
-    if remaining:
-        return f"Следующая попытка этой профессии через {remaining} сек."
-    questions = [(index, rng.sample(range(3), 3)) for index in rng.sample(range(len(PRACTICES[action])), 3)]
-    db.execute("INSERT INTO practices VALUES (?, ?, ?, 0, 0, ?)", (user_id, action, json.dumps(questions), token_hex(5)))
-    return practice_scene(active_practice(db, user_id))
-
-
-def answer(db, hero, action, now):
-    user_id = hero["user_id"]
-    state = active_practice(db, user_id)
-    if not state:
-        return "Сначала открой мини-игру: /practice"
-    skill = state["skill"]
-    if action == "cancel":
-        db.execute("DELETE FROM practices WHERE user_id = ?", (user_id,))
-        set_cooldown(db, user_id, skill, now + PRACTICE_DELAY)
-        return "Испытание завершено досрочно. /practice"
-    if action not in {"1", "2", "3"}:
-        return practice_scene(state)
-    _, labels, correct = practice_question(state)
-    score = state["score"] + (int(action) == correct)
-    feedback = f"Правильный ответ: {labels[correct - 1]}."
-    if state["step"] < 2:
-        db.execute("UPDATE practices SET step = step + 1, score = ?, token = ? WHERE user_id = ?",
-                   (score, token_hex(5), user_id))
-        return feedback + "\n" + practice_scene(active_practice(db, user_id))
-    db.execute("DELETE FROM practices WHERE user_id = ?", (user_id,))
-    set_cooldown(db, user_id, skill, now + PRACTICE_DELAY)
-    if score < 2:
-        return f"{feedback}\nРезультат: {score}/3. Для награды нужны два верных ответа."
-    xp, coins, points = (12, 6, 2) if score == 3 else (8, 3, 1)
-    db.execute(f"UPDATE heroes SET {skill} = {skill} + ? WHERE user_id = ?", (points, user_id))
-    return f"{feedback}\nРезультат: {score}/3. +{points} очк. навыка, {reward(db, user_id, xp, coins)}."

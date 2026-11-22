@@ -1,12 +1,13 @@
 """Inline navigation and illustrated responses for Telegram."""
 import re
 
+from activities import QUESTS
 from loot import ITEMS
 from art_catalog import (
-    CHOICE_ART, GALLERY, JOURNAL_ART, QUEST_ART, ROUTE_ART, SCREEN_ART, TITLES,
+    CHOICE_ART, GALLERY, QUEST_ART, ROUTE_ART, SCREEN_ART, TITLES, event_illustration,
 )
 from fieldwork_menu import ACTIONS as FIELDWORK_ACTIONS, fieldwork_view, step_command
-from game import ROUTE_MENU, ROUTES, encounter
+from adventures import ROUTE_MENU, ROUTES, current_scene, encounter
 
 
 MENU = (
@@ -15,12 +16,14 @@ MENU = (
     (("В отсутствие", "offline"), ("Мини-игры", "practice"), ("Галерея", "gallery")),
 )
 ACTIONS = FIELDWORK_ACTIONS | {action for row in MENU for _, action in row} | {
-    "adventure_forest", "adventure_ruins", "start", "professions",
-    "quest_forest", "quest_keeper", "train_scout", "train_herbalist",
+    *(f"adventure_{key}" for key in ROUTES),
+    "start", "professions",
+    *(f"quest_{key}" for key in QUESTS),
+    "train_scout", "train_herbalist",
     "boss", "raid", "pvp",
     *{f"equip_{item}" for item in ITEMS},
 }
-CHOICE = re.compile(r"world:choose:([0-9]{1,19}):([12])")
+CHOICE = re.compile(r"world:choose:([0-9]{1,19}):([12]|leave)")
 BACK = (("Главное меню", "start"),)
 
 
@@ -71,31 +74,30 @@ def journal_illustrations(db, user_id):
     """, (user_id,))
     keys = {}
     for entry in entries:
-        description = entry["summary"].partition(" +")[0]
-        for phrase, key in JOURNAL_ART.items():
-            if phrase in description:
-                keys[key] = None
-                break
+        key = event_illustration(entry["summary"])
+        if key:
+            keys[key] = None
     return list(keys)
 
 
 def present(db, user_id, update_id, reply, command, argument, route_before=None, subject_before=None):
     hero = db.execute("SELECT route FROM heroes WHERE user_id = ?", (user_id,)).fetchone()
     route = hero["route"] if hero else None
-    if route and reply == encounter(route):
-        _, *choices = ROUTES[route]
+    if route and command in {"/adventure", "/choose"} and reply.endswith(encounter(db, user_id, route)):
+        _, scene, _ = current_scene(db, user_id, route)
         db.execute("""
             INSERT INTO encounter_controls VALUES (?, ?)
             ON CONFLICT (user_id) DO UPDATE SET update_id = excluded.update_id
         """, (user_id, update_id))
         rows = [
-            ((label, f"choose:{update_id}:{number}"),)
-            for number, (_, label, _) in enumerate(choices, 1)
+            ((option.title, f"choose:{update_id}:{number}"),)
+            for number, option in enumerate(scene.options, 1)
         ]
+        rows.append((("Вернуться", f"choose:{update_id}:leave"),))
         return controls(rows), ROUTE_ART[route]
     if reply == ROUTE_MENU:
         rows = (
-            (("Туманный лес", "adventure_forest"), ("Старая башня", "adventure_ruins")),
+            *(((f"{area.title} · ур. {area.level}", f"adventure_{key}"),) for key, area in ROUTES.items()),
             (("Пошаговая охота", "hunt"), ("Одиночный босс", "boss")),
             (("Рейды", "raid"), ("Дуэли", "pvp")),
             BACK,
@@ -121,12 +123,14 @@ def present(db, user_id, update_id, reply, command, argument, route_before=None,
             rows.insert(0, (("Надеть", f"equip_{argument}"),))
         return controls(rows), art
     if command == "/choose" and route_before:
-        art = CHOICE_ART[route_before].get(argument, ROUTE_ART[route_before])
+        art = CHOICE_ART.get(route_before, {}).get(argument, ROUTE_ART[route_before])
         rows = ((("Походы", "adventure"), ("Сумка", "bag")), BACK)
     if command == "/adventure" and argument in ROUTE_ART:
         art = ROUTE_ART[argument]
     if command == "/npc" or (command == "/quest" and not argument):
-        rows = ((("Дозорница Мира", "quest_forest"), ("Архивист Орин", "quest_keeper")), BACK)
+        quest_rows = [((ROUTES[key].title if key in ROUTES else "Пепельный смотритель", f"quest_{key}"),)
+                      for key in QUESTS]
+        rows = (*quest_rows, BACK)
     if command == "/quest":
         art = QUEST_ART.get(argument, art)
     if command == "/hero":

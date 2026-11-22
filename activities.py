@@ -17,6 +17,16 @@ COMMANDS = {
 INVITE_SECONDS = 600
 
 
+QUESTS = {
+    "forest": ("Дозорница Мира", "Дважды успешно вернись из Туманного леса.", 2, 20, 15, "charm"),
+    "keeper": ("Архивист Орин", "Победи Пепельного смотрителя.", 1, 30, 25, None),
+    "fen": ("Дозорница Мира", "Помоги жителям Топи колоколов добраться до берега.", 1, 18, 12, None),
+    "pass": ("Дозорница Мира", "Заверши спасательную вылазку на Белом перевале.", 1, 25, 18, None),
+    "archive": ("Архивист Орин", "Заверши экспедицию в Затопленном архиве.", 1, 32, 23, None),
+    "observatory": ("Архивист Орин", "Заверши экспедицию в Пепельной обсерватории.", 1, 40, 30, None),
+}
+
+
 def init_activities(db):
     db.executescript("""
         CREATE TABLE IF NOT EXISTS loot (
@@ -117,15 +127,11 @@ def inventory(db, hero, argument, equip=False):
 
 
 def quest(db, hero_id, argument):
-    quests = {
-        "forest": ("Дозорница Мира", "Дважды успешно вернись из Туманного леса.", 2, 20, 15, "charm"),
-        "keeper": ("Архивист Орин", "Победи Пепельного смотрителя.", 1, 30, 25, None),
-    }
     if not argument:
-        return "\n".join(f"{npc}: {goal} /quest_{key}" for key, (npc, goal, *_) in quests.items())
-    if argument not in quests:
+        return "\n".join(f"{npc}: {goal} /quest_{key}" for key, (npc, goal, *_) in QUESTS.items())
+    if argument not in QUESTS:
         return "Доступные задания: /npc"
-    npc, goal, target, xp, coins, item = quests[argument]
+    npc, goal, target, xp, coins, item = QUESTS[argument]
     row = db.execute("SELECT * FROM quest_progress WHERE hero_id = ? AND quest = ?", (hero_id, argument)).fetchone()
     if row is None:
         db.execute("INSERT INTO quest_progress (hero_id, quest) VALUES (?, ?)", (hero_id, argument))
