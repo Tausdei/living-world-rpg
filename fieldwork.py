@@ -3,6 +3,7 @@ import random
 from secrets import token_hex
 
 from activities import record_objective, reward, stats
+from campaign import mark
 
 
 HUNT_DELAY = 180
@@ -139,6 +140,7 @@ def turn(db, hero, action, now, rng=random):
 
     if foe_hp <= 0:
         end_hunt(db, user_id, now)
+        mark(db, user_id, "keeper" if key == "keeper" else "hunt")
         if key == "keeper":
             db.execute("""
                 INSERT INTO boss_victory VALUES (?, ?)

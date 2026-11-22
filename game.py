@@ -5,9 +5,10 @@ import time
 from datetime import UTC, datetime
 
 import activities
+import campaign
 import fieldwork
 import practice_games
-from adventures import PROFESSIONS, ROUTES, ROUTE_MENU, choose, encounter, init_adventures
+from adventures import PROFESSIONS, ROUTES, ROUTE_MENU, choose, encounter, init_adventures, region
 from art_catalog import GALLERY, TITLES
 from world import advance_hero, init_world, offline, schedule_hero
 from world_events import JOBS
@@ -16,6 +17,9 @@ from world_events import JOBS
 COMMANDS = {
     **activities.COMMANDS,
     "start": "Команды игры",
+    "story": "Текущая глава и её цели",
+    "story_claim": "Завершить главу",
+    "region": "Описание места перед походом",
     "offline": "Фоновое занятие героя",
     "hunt": "Пошаговая охота",
     "turn": "Действие текущего боя",
@@ -32,6 +36,8 @@ COMMANDS = {
     "choose": "Принять решение в походе",
 }
 SHORTCUTS = {
+    **{f"story_claim_{key}": ("story_claim", key) for key in campaign.CHAPTER_KEYS},
+    **{f"region_{key}": ("region", key) for key in ROUTES},
     **{f"offline_{job}": ("offline", job) for job in JOBS},
     **{f"hunt_{enemy}": ("hunt", enemy) for enemy in fieldwork.ENEMIES},
     **{f"turn_{action}": ("turn", action) for action in fieldwork.HUNT_ACTIONS},
@@ -40,7 +46,7 @@ SHORTCUTS = {
     **{f"adventure_{key}": ("adventure", key) for key in ROUTES},
     "choose_1": ("choose", "1"),
     "choose_2": ("choose", "2"),
-    "choose_leave": ("choose", "leave"),
+    **{f"choose_{key}": ("choose", key) for key in ("leave", "aid", "risk")},
     "train_scout": ("train", "scout"),
     "train_herbalist": ("train", "herbalist"),
     **{f"quest_{key}": ("quest", key) for key in activities.QUESTS},
@@ -55,6 +61,7 @@ INVITE_COMMAND = re.compile(r"/(raid_join|pvp_accept)_([0-9]{1,18})")
 HELP = """Живой мир
 /create Имя — создать героя
 /hero — уровень, опыт и монеты
+/story — глава, цели и награда
 /journal — что случилось с героем
 /professions — навыки
 /train_scout или /train_herbalist — обучение
@@ -105,6 +112,7 @@ def connect(path):
     fieldwork.init_fieldwork(db)
     init_adventures(db)
     practice_games.init_practice(db)
+    campaign.init_campaign(db)
     return db
 
 
@@ -141,6 +149,9 @@ def play(db, user_id, message, bot_name=None):
     if command == "/art":
         return TITLES.get(argument, "Выбери иллюстрацию в /gallery.")
 
+    if command == "/region":
+        return region(argument)
+
     now = int(time.time())
     advance_hero(db, user_id, now)
     hero = db.execute("SELECT * FROM heroes WHERE user_id = ?", (user_id,)).fetchone()
@@ -151,12 +162,14 @@ def play(db, user_id, message, bot_name=None):
             return "Введи /create Имя. Допустимы 2–24 буквы, цифры, пробелы, дефисы или подчёркивания."
         db.execute("INSERT INTO heroes (user_id, name) VALUES (?, ?)", (user_id, argument))
         schedule_hero(db, user_id)
-        return f"{argument} отправляется в путь. У тебя 10 монет. /adventure · /journal"
+        return f"{argument} отправляется в путь. У тебя 10 монет. Продолжить историю: /story"
     if command.lstrip("/") not in COMMANDS or not command.startswith("/"):
         return "Список команд — /help"
     if hero is None:
         return "Сначала создай героя: /create Имя"
 
+    if command in {"/story", "/story_claim"}:
+        return campaign.story(db, user_id, argument if command == "/story_claim" else None)
     if command in {"/bag", "/equip"}:
         return activities.inventory(db, hero, argument, equip=command == "/equip")
     if command in {"/npc", "/quest"}:

@@ -7,23 +7,26 @@ from art_catalog import (
     CHOICE_ART, GALLERY, QUEST_ART, ROUTE_ART, SCREEN_ART, TITLES, event_illustration,
 )
 from fieldwork_menu import ACTIONS as FIELDWORK_ACTIONS, fieldwork_view, step_command
-from adventures import ROUTE_MENU, ROUTES, current_scene, encounter
+from adventures import ROUTE_MENU, ROUTES, current_scene, detour_state, encounter
+from campaign import CHAPTER_KEYS, story_state
 
 
 MENU = (
-    (("Герой", "hero"), ("Походы", "adventure")),
+    (("История", "story"), ("Герой", "hero"), ("Походы", "adventure")),
     (("Сумка", "bag"), ("Квесты", "npc"), ("Журнал", "journal")),
     (("В отсутствие", "offline"), ("Мини-игры", "practice"), ("Галерея", "gallery")),
 )
 ACTIONS = FIELDWORK_ACTIONS | {action for row in MENU for _, action in row} | {
     *(f"adventure_{key}" for key in ROUTES),
+    *(f"region_{key}" for key in ROUTES),
+    *(f"story_claim_{key}" for key in CHAPTER_KEYS),
     "start", "professions",
     *(f"quest_{key}" for key in QUESTS),
     "train_scout", "train_herbalist",
     "boss", "raid", "pvp",
     *{f"equip_{item}" for item in ITEMS},
 }
-CHOICE = re.compile(r"world:choose:([0-9]{1,19}):([12]|leave)")
+CHOICE = re.compile(r"world:choose:([0-9]{1,19}):([12]|leave|aid|risk)")
 BACK = (("Главное меню", "start"),)
 
 
@@ -84,7 +87,8 @@ def present(db, user_id, update_id, reply, command, argument, route_before=None,
     hero = db.execute("SELECT route FROM heroes WHERE user_id = ?", (user_id,)).fetchone()
     route = hero["route"] if hero else None
     if route and command in {"/adventure", "/choose"} and reply.endswith(encounter(db, user_id, route)):
-        _, scene, _ = current_scene(db, user_id, route)
+        index, scene, prepared = current_scene(db, user_id, route)
+        _, _, detour = detour_state(db, user_id, route, index, prepared)
         db.execute("""
             INSERT INTO encounter_controls VALUES (?, ?)
             ON CONFLICT (user_id) DO UPDATE SET update_id = excluded.update_id
@@ -93,16 +97,37 @@ def present(db, user_id, update_id, reply, command, argument, route_before=None,
             ((option.title, f"choose:{update_id}:{number}"),)
             for number, option in enumerate(scene.options, 1)
         ]
+        if detour:
+            if detour["aid_available"]:
+                rows.append(((f"{detour['aid']} · {detour['cost']} монет", f"choose:{update_id}:aid"),))
+            rows.append(((f"{detour['risk']} · риск", f"choose:{update_id}:risk"),))
         rows.append((("Вернуться", f"choose:{update_id}:leave"),))
         return controls(rows), ROUTE_ART[route]
     if reply == ROUTE_MENU:
         rows = (
-            *(((f"{area.title} · ур. {area.level}", f"adventure_{key}"),) for key, area in ROUTES.items()),
+            *(((f"{area.title} · ур. {area.level}", f"region_{key}"),) for key, area in ROUTES.items()),
             (("Пошаговая охота", "hunt"), ("Одиночный босс", "boss")),
             (("Рейды", "raid"), ("Дуэли", "pvp")),
             BACK,
         )
         return controls(rows), "village"
+
+    if command in {"/story", "/story_claim"} and hero:
+        current = story_state(db, user_id)["current"]
+        story_rows = []
+        if current:
+            if current["ready"]:
+                story_rows.append((("Завершить главу", f"story_claim_{current['key']}"),))
+            else:
+                for goal in current["goals"]:
+                    if not goal["done"]:
+                        story_rows.append(((goal["label"], goal["command"]),))
+        art = current["art"] if current else "village"
+        return controls([*story_rows, BACK]), art
+    if command == "/region" and argument in ROUTES:
+        rows = [(("Отправиться", f"adventure_{argument}"),),
+                (("Все походы", "adventure"), ("Профессии", "professions")), BACK]
+        return controls(rows), ROUTES[argument].art
 
     fieldwork = fieldwork_view(db, user_id, command, argument, subject_before)
     if fieldwork:
@@ -124,7 +149,7 @@ def present(db, user_id, update_id, reply, command, argument, route_before=None,
         return controls(rows), art
     if command == "/choose" and route_before:
         art = CHOICE_ART.get(route_before, {}).get(argument, ROUTE_ART[route_before])
-        rows = ((("Походы", "adventure"), ("Сумка", "bag")), BACK)
+        rows = ((("Походы", "adventure"), ("Сумка", "bag")), (("История", "story"),), BACK)
     if command == "/adventure" and argument in ROUTE_ART:
         art = ROUTE_ART[argument]
     if command == "/npc" or (command == "/quest" and not argument):

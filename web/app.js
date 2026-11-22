@@ -5,7 +5,7 @@ const navigation = document.querySelector("#navigation");
 const statusLine = document.querySelector("#status");
 const notice = document.querySelector("#notice");
 const sections = {
-  camp: "Поселение", journey: "Походы", hero: "Герой", work: "Занятия",
+  camp: "Поселение", story: "История", journey: "Походы", hero: "Герой", work: "Занятия",
   journal: "Журнал", company: "Отряд",
 };
 let game;
@@ -90,6 +90,7 @@ async function perform(command) {
   try {
     const response = await request(command);
     game = response.state;
+    if (command?.startsWith("/adventure_") && game.encounter) location.hash = "#journey";
     render();
     const openedScreen = (game.encounter && command?.startsWith("/adventure_"))
       || (game.practice && ["/practice_scout", "/practice_herbalist"].includes(command));
@@ -114,6 +115,11 @@ async function perform(command) {
 function camp() {
   return [
     banner("village", "Поселение у леса", "Снарядись, выбери путь и возвращайся сюда между походами."),
+    heading("Продолжить историю"),
+    make("section", { class: "panel" },
+      make("h3", {}, game.story.current?.title || "Летопись завершена"),
+      make("p", {}, game.story.current?.description || game.story.ending),
+      make("a", { class: "action primary", href: "#story" }, "Открыть летопись")),
     heading("Куда пойти"),
     grid(tile("misty-forest", "В поход", "Шесть локаций и пошаговая охота", "#journey"),
       tile("bag", "К герою", "Характеристики и снаряжение", "#hero"),
@@ -125,6 +131,47 @@ function camp() {
 function metre(label, current, maximum) {
   return make("div", {}, make("strong", {}, `${label} · ${current}/${maximum}`),
     make("progress", { value: current, max: maximum, "aria-label": label }));
+}
+
+function storyPage() {
+  const story = game.story;
+  const current = story.current;
+  const milestones = story.chapters.map((title, index) => make("li", {
+    class: index === story.completed ? "active-chapter" : null,
+    "aria-current": index === story.completed ? "step" : null,
+  }, `${index + 1}. ${title}${index < story.completed ? " · завершена" : ""}`));
+  const guide = current
+    ? make("section", { class: "panel battle" }, heading("Цели главы"),
+      make("ul", { class: "story-goals" }, current.goals.map(goal => make("li", {},
+        make("span", {}, `${goal.done ? "✓" : "○"} ${goal.label}`),
+        goal.done ? null : make("a", { class: "action", href: goal.destination }, "Открыть")))),
+      make("p", {}, `Награда: ${current.xp} опыта и ${current.coins} монет`),
+      current.ready ? button("Завершить главу", `/story_claim_${current.key}`, true) : null)
+    : null;
+  return [
+    banner(current?.art || "village", current?.title || "Летопись завершена", current?.description || story.ending),
+    guide,
+    heading(`Главы · ${story.completed}/${story.chapters.length}`),
+    make("ol", { class: "chapter-list panel" }, milestones),
+  ];
+}
+
+function regionPage(route) {
+  const available = game.hero.level >= route.level;
+  const start = button("Отправиться", `/adventure_${route.key}`, true);
+  start.disabled = !available;
+  const details = route.difficulty ? `Базовый ранг навыка: ${route.difficulty}.` : "Подходит для первого похода.";
+  return [
+    banner(route.art, route.name, route.description),
+    make("section", { class: "panel battle" },
+      make("p", {}, `Уровень ${route.level} · этапов: ${route.scenes}`),
+      make("p", {}, details),
+      route.scenes > 1 ? make("p", {}, `Подготовка с ранга ${Math.max(0, route.difficulty - 1)} облегчает финал.`) : null,
+      make("p", { class: "muted" }, `Твои ранги: следопыт ${Math.floor(game.hero.scout / 3)}, травник ${Math.floor(game.hero.herbalist / 3)}.`),
+      actions(available ? start : make("p", {}, `Откроется на уровне ${route.level}.`),
+        make("a", { class: "action", href: "#journey" }, "Все походы"),
+        make("a", { class: "action", href: "#work" }, "Развить навыки"))),
+  ];
 }
 
 function journeys() {
@@ -144,6 +191,12 @@ function journeys() {
       make("section", { class: "panel battle" },
         encounter.total > 1 ? make("p", {}, `Этап ${encounter.stage}/${encounter.total}`) : null,
         encounter.required !== null ? make("p", {}, `Требуемый ранг профессии: ${encounter.required}`) : null,
+        encounter.bonus ? make("p", {}, `За успех: +${encounter.bonus} монет.`) : null,
+        encounter.detour ? make("div", { class: "detour" },
+          make("h3", {}, "Попутный выбор"), make("p", {}, encounter.detour.description),
+          actions(encounter.detour.aid_available
+            ? button(`${encounter.detour.aid} · ${encounter.detour.cost} монет, −1 ранг`, "/choose_aid") : null,
+            button(`${encounter.detour.risk} · +1 ранг, +${encounter.detour.bonus} монет`, "/choose_risk"))) : null,
         actions(encounter.choices.map((choice, i) => button(choice, `/choose_${i + 1}`, i === 0)),
           button("Вернуться в поселение", "/choose_leave"))),
     ];
@@ -152,7 +205,7 @@ function journeys() {
     banner("misty-forest", "Походы", "В лесу важны внимательность и подготовка. Выбери маршрут или противника."),
     heading("Маршруты"),
     grid(game.routes.map(route => tile(route.art, route.name,
-      `С уровня ${route.level}${route.scenes > 1 ? " · 2 этапа" : ""}`, `/adventure_${route.key}`))),
+      `С уровня ${route.level}${route.scenes > 1 ? " · 2 этапа" : ""}`, `#route-${route.key}`))),
     heading("Пошаговая охота"),
     grid(game.enemies.map(enemy => tile(enemy.art, enemy.name, `С уровня ${enemy.level}`, `/hunt_${enemy.key}`))),
   ];
@@ -253,12 +306,13 @@ function render() {
     return;
   }
   const page = location.hash.slice(1);
-  const current = Object.hasOwn(sections, page) ? page : "camp";
+  const region = page.startsWith("route-") ? game.routes.find(route => route.key === page.slice(6)) : null;
+  const current = region ? "journey" : Object.hasOwn(sections, page) ? page : "camp";
   navigation.replaceChildren(...Object.entries(sections).map(([key, label]) =>
     make("a", { href: `#${key}`, "aria-current": key === current ? "page" : null }, label)));
   statusLine.textContent = `${game.hero.name} · ур. ${game.hero.level} · ${game.hero.coins} монет`;
-  const pages = { camp, journey: journeys, hero: heroPage, work, journal, company };
-  view.replaceChildren(...pages[current]());
+  const pages = { camp, story: storyPage, journey: journeys, hero: heroPage, work, journal, company };
+  view.replaceChildren(...(region ? regionPage(region) : pages[current]()));
 }
 
 window.addEventListener("hashchange", () => {

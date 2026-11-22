@@ -11,11 +11,13 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from activities import QUESTS, stats
-from adventures import ROUTES, current_scene
+from adventures import ROUTES, current_scene, detour_state
 from art_catalog import QUEST_ART, event_illustration, illustration_path
+from campaign import story_state
 from fieldwork import ENEMIES, HUNT_ACTIONS, active_hunt
 from game import PROFESSIONS, connect, play
 from practice_games import active_practice, practice_view
+from region_details import REGIONS
 from loot import ITEMS
 from world import advance_hero, current_job
 from world_events import JOBS
@@ -78,11 +80,12 @@ def state(db, user_id):
     if route:
         area = ROUTES[route]
         index, scene, prepared = current_scene(db, user_id, route)
+        required, bonus, detour = detour_state(db, user_id, route, index, prepared)
         encounter = {
             "title": area.title, "art": area.art, "description": scene.description,
             "choices": [option.title for option in scene.options],
             "stage": index + 1, "total": len(area.scenes),
-            "required": max(0, area.difficulty - prepared) if index else None,
+            "required": required if index else None, "bonus": bonus, "detour": detour,
         }
     return {
         "hero": {**dict(hero), "level": 1 + hero["xp"] // 30, "hp": hp, "attack": attack},
@@ -91,8 +94,10 @@ def state(db, user_id):
                  "bonus": ITEMS[row["item"]][2]} for row in inventory],
         "battle": battle, "practice": practice_view(practice) if practice else None,
         "job": current_job(db, user_id), "encounter": encounter,
+        "story": story_state(db, user_id),
         "routes": [{"key": key, "name": area.title, "art": area.art,
-                    "level": area.level, "scenes": len(area.scenes)} for key, area in ROUTES.items()],
+                    "level": area.level, "scenes": len(area.scenes),
+                    "description": REGIONS[key], "difficulty": area.difficulty} for key, area in ROUTES.items()],
         "jobs": [{"key": key, "name": name, "description": description, "art": art}
                  for key, (name, description, art) in JOBS.items()],
         "enemies": [{"key": key, "name": data[0], "level": data[1], "art": "ash-keeper" if key == "keeper" else key}

@@ -4,6 +4,7 @@ import random
 from secrets import token_hex
 
 from activities import reward
+from campaign import mark
 from fieldwork import PRACTICE_DELAY, set_cooldown, wait_seconds
 
 
@@ -165,6 +166,7 @@ def answer(db, hero, action, now):
     set_cooldown(db, user_id, skill, now + PRACTICE_DELAY)
     if not won:
         return message + " /practice"
+    mark(db, user_id, "practice")
     points = 2 if data["remaining"] >= 2 else 1
     db.execute(f"UPDATE heroes SET {skill} = {skill} + ? WHERE user_id = ?", (points, user_id))
     return f"{message} Испытание пройдено. +{points} очк. навыка, {reward(db, user_id, 12, 6)}."

@@ -53,3 +53,11 @@ progress{display:block;width:100%;height:12px;margin:.4rem 0 .7rem;accent-color:
 .trail .goal{background:#4f4129;color:#f1ce8e}
 .trail .player{background:var(--gold);color:#251e15}
 .event-card img{width:100%;aspect-ratio:1.6;object-fit:cover;border-radius:.45rem;margin-bottom:.5rem}
+
+.story-goals,.chapter-list{list-style:none;margin:.55rem 0 1rem;padding-left:0}
+.story-goals li{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:.5rem;padding:.45rem 0;border-bottom:1px solid var(--stroke)}
+.chapter-list{padding:1rem}
+.chapter-list li{padding:.35rem 0;color:var(--muted)}
+.chapter-list .active-chapter{color:var(--gold);font-weight:700}
+.detour{margin-top:1rem;border-top:1px solid var(--stroke);border-bottom:1px solid var(--stroke);padding:1rem 0}
+@media(max-width:620px){#navigation{grid-template-columns:repeat(4,minmax(0,1fr))}#navigation a{font-size:.78rem}}
