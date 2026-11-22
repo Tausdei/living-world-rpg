@@ -2,6 +2,7 @@
 
 const view = document.querySelector("#view");
 const navigation = document.querySelector("#navigation");
+const sectionMenu = document.querySelector("#section-menu");
 const statusLine = document.querySelector("#status");
 const notice = document.querySelector("#notice");
 const navigationItems = [
@@ -52,7 +53,9 @@ function button(label, command, primary = false) {
   return element;
 }
 
-function grid(...tiles) { return make("div", { class: "grid" }, ...tiles); }
+function cardList(...cards) {
+  return make("ul", { class: "card-list" }, cards.flat().map(card => make("li", {}, card)));
+}
 function actions(...buttons) { return make("div", { class: "actions" }, ...buttons); }
 function heading(text) { return make("h2", {}, text); }
 function link(label, destination, primary = false) {
@@ -221,7 +224,7 @@ function camp() {
       next[1] === "#story" ? null : link("История", "#story")) }),
     goal && next[1] === "#story" ? make("p", { class: "next-goal" }, "Следующая цель: ", goal.label) : null,
     heading("Быстрый доступ"),
-    grid(tile("misty-forest", "Походы", "Маршруты и пошаговые бои", "#journey"),
+    cardList(tile("misty-forest", "Походы", "Маршруты и пошаговые бои", "#journey"),
       tile("bag", "Герой", "Снаряжение и профессии", "#hero"),
       tile("quests", "Задания и отряд", "Поручения, рейды и дуэли", "#company"),
       tile("patrol", "Занятия", "Фоновая работа и мини-игры", "#work")),
@@ -305,10 +308,10 @@ function journeys() {
   return [
     banner("misty-forest", "Походы", "В лесу важны внимательность и подготовка. Выбери маршрут или противника."),
     heading("Маршруты"),
-    grid(game.routes.map(route => tile(route.art, route.name,
+    cardList(game.routes.map(route => tile(route.art, route.name,
       `${game.hero.level < route.level ? "Закрыто · " : ""}Уровень ${route.level}${route.scenes > 1 ? " · 2 этапа" : ""}`, `#route-${route.key}`))),
     heading("Пошаговая охота"),
-    grid(game.enemies.map(enemy => tile(enemy.art, enemy.name,
+    cardList(game.enemies.map(enemy => tile(enemy.art, enemy.name,
       game.hero.level < enemy.level ? `Закрыто · уровень ${enemy.level}` : "Начать бой",
       `/hunt_${enemy.key}`, false, game.hero.level < enemy.level))),
   ];
@@ -323,11 +326,11 @@ function heroPage() {
     make("section", { class: "panel battle" }, metre("Опыт до следующего уровня", hero.xp % 30, 30),
       make("p", {}, `${hero.coins} монет`)),
     heading("Снаряжение"),
-    wornFirst.length ? grid(wornFirst.map(item => tile(item.key, item.name,
+    wornFirst.length ? cardList(wornFirst.map(item => tile(item.key, item.name,
       `${slots[item.slot]} · +${item.bonus} · ×${item.quantity}${item.worn ? " · надето" : " · надеть"}`,
       `/equip_${item.key}`, item.worn))) : make("p", { class: "muted" }, "Сумка пуста. Найди первую добычу в походе."),
     heading("Профессии"),
-    grid(Object.entries(game.professions).map(([key, name]) => tile(key, name,
+    cardList(Object.entries(game.professions).map(([key, name]) => tile(key, name,
       `Очков навыка: ${hero[key]} · Тренировка за 5 монет`, `/train_${key}`))),
     make("details", { class: "panel battle" }, make("summary", {}, "Перенос героя"), profilePanel()),
   ];
@@ -359,10 +362,10 @@ function work() {
   const practice = game.practice;
   const lessons = [heading("Мини-игры профессий"),
     practice ? practicePanel(practice) :
-      grid(tile("scout-game", "Тропа по следам", "Проложи путь по карте", "/practice_scout"),
+      cardList(tile("scout-game", "Тропа по следам", "Проложи путь по карте", "/practice_scout"),
         tile("herbalist-game", "Настой у котла", "Управляй огнём и добавляй порции", "/practice_herbalist"))];
   const jobs = [heading("Фоновое занятие"),
-    grid(game.jobs.map(job => tile(job.art, job.name,
+    cardList(game.jobs.map(job => tile(job.art, job.name,
       game.job === job.key ? `Выбрано · ${job.description}` : job.description,
       `/offline_${job.key}`, game.job === job.key)))];
   return [
@@ -378,7 +381,7 @@ function journal() {
   return [
     banner("journal", "Журнал героя", "Последние события, рассчитанные с учётом выбранного занятия."),
     actions(button("Обновить журнал")),
-    game.journal.length ? grid(game.journal.map(entry => make("article", { class: "panel event-card" },
+    game.journal.length ? cardList(game.journal.map(entry => make("article", { class: "panel event-card" },
       entry.art ? image(entry.art) : null,
       make("time", {}, date.format(new Date(entry.occurred_at * 1000))), make("p", {}, entry.summary)))) :
       make("p", { class: "muted" }, "Первое фоновое событие появится примерно через 30 минут после создания героя."),
@@ -389,7 +392,7 @@ function company() {
   return [
     banner("colossus", "Квесты и отряд", "Выполняй поручения жителей или собери других героев для рейда."),
     heading("Поручения"),
-    grid(game.quests.map(quest => tile(quest.art, quest.title,
+    cardList(game.quests.map(quest => tile(quest.art, quest.title,
       `${quest.npc} · ${quest.description}`, `/quest_${quest.key}`))),
     heading("Совместная игра"),
     make("section", { class: "panel" }, make("h3", {}, "Рейд на Каменного колосса"),
@@ -436,7 +439,7 @@ function townScreen(section) {
     return [
       ...(section ? [back("Город", "#town")] : []),
       banner(townPage.art, section ? townPage.title : "Городские занятия", townPage.text, { compact: true }),
-      grid(townPage.buttons.map(item => tile(item.art, item.label, item.detail,
+      cardList(townPage.buttons.map(item => tile(item.art, item.label, item.detail,
         `#town-${item.command.split(" ")[1]}`))),
     ];
   }
@@ -479,7 +482,7 @@ function startCaveTimer() {
 function render() {
   clearInterval(caveTimer);
   view.removeAttribute("aria-busy");
-  navigation.hidden = !game.hero;
+  sectionMenu.hidden = !game.hero;
   statusLine.hidden = !game.hero;
   if (!game.hero) {
     view.replaceChildren(banner("village", "Живой мир", "Твоя история начинается у границы Туманного леса."),
@@ -505,11 +508,15 @@ function render() {
   startCaveTimer();
 }
 
+navigation.addEventListener("click", event => {
+  if (event.target.closest("a")) sectionMenu.open = false;
+});
 document.querySelector(".skip-link").addEventListener("click", event => {
   event.preventDefault();
   focusTitle();
 });
 window.addEventListener("hashchange", () => {
+  sectionMenu.open = false;
   notice.hidden = true;
   window.scrollTo(0, 0);
   if (!game) return;

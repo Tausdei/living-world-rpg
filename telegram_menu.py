@@ -42,8 +42,8 @@ BACK = (("Меню", "start"),)
 
 def controls(rows):
     return {"inline_keyboard": [
-        [{"text": label, "callback_data": f"world:{action}"} for label, action in row]
-        for row in rows
+        [{"text": label, "callback_data": f"world:{action}"}]
+        for row in rows for label, action in row
     ]}
 
 
