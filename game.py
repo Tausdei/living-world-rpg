@@ -11,6 +11,7 @@ import practice_games
 import town
 from adventures import PROFESSIONS, ROUTES, ROUTE_MENU, choose, encounter, init_adventures, region
 from art_catalog import GALLERY, TITLES
+from lore import LORE
 from world import advance_hero, init_world, offline, schedule_hero
 from world_events import JOBS
 
@@ -156,7 +157,11 @@ def play(db, user_id, message, bot_name=None):
             return title + "\n" + "\n".join(f"{name} · /art {key}" for key, name in entries.items())
         return title + "\n" + "\n".join(f"{name} · /gallery {key}" for key, (name, _) in GALLERY.items())
     if command == "/art":
-        return TITLES.get(argument, "Выбери иллюстрацию в /gallery.")
+        title = TITLES.get(argument)
+        if title is None:
+            return "Выбери иллюстрацию в /gallery."
+        note = LORE.get(argument)
+        return f"{title}\n\n{note}" if note else title
 
     if command == "/region":
         return region(argument)

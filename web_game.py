@@ -23,6 +23,7 @@ from game import PROFESSIONS, connect, play
 from practice_games import active_practice, practice_view
 from region_details import REGIONS
 from loot import ITEMS
+from lore import LORE
 from world import advance_hero, current_job
 from world_events import JOBS
 
@@ -71,8 +72,11 @@ def state(db, user_id):
         return {"hero": None}
     hp, attack = stats(db, hero)
     inventory = db.execute("""
-        SELECT loot.*, equipped.item IS NOT NULL AS worn FROM loot
-        LEFT JOIN equipped USING (hero_id, item) WHERE hero_id = ? ORDER BY loot.item
+        SELECT loot.*, equipped.item IS NOT NULL AS worn,
+            COALESCE(upgrades.sharpening, 0) + COALESCE(upgrades.rune, 0) + COALESCE(upgrades.stars, 0) AS increase
+        FROM loot LEFT JOIN equipped USING (hero_id, item)
+        LEFT JOIN gear_upgrades AS upgrades ON upgrades.item = loot.item AND upgrades.user_id = loot.hero_id
+        WHERE hero_id = ? ORDER BY loot.item
     """, (user_id,)).fetchall()
     hunt = active_hunt(db, user_id)
     practice = active_practice(db, user_id)
@@ -99,22 +103,25 @@ def state(db, user_id):
             "stage": index + 1, "total": len(area.scenes),
             "required": required if index else None, "bonus": bonus, "detour": detour,
         }
+    foes = []
+    for key, data in ENEMIES.items():
+        art = "ash-keeper" if key == "keeper" else key
+        foes.append({"key": key, "name": data[0], "level": data[1], "art": art, "lore": LORE[art]})
     return {
         "hero": {**dict(hero), "level": 1 + hero["xp"] // 30, "hp": hp, "attack": attack},
         "bag": [{"key": row["item"], "quantity": row["quantity"], "worn": row["worn"],
                  "name": ITEMS[row["item"]][0], "slot": ITEMS[row["item"]][1],
-                 "bonus": ITEMS[row["item"]][2]} for row in inventory],
+                 "bonus": ITEMS[row["item"]][2] + row["increase"], "lore": LORE[row["item"]]} for row in inventory],
         "battle": battle, "activeContest": bool(contest), "practice": practice_view(practice) if practice else None,
         "job": current_job(db, user_id), "encounter": encounter,
         "story": story_state(db, user_id),
         "townSections": list(town.SECTIONS) + list(town.GROUPS),
         "routes": [{"key": key, "name": area.title, "art": area.art,
                     "level": area.level, "scenes": len(area.scenes),
-                    "description": REGIONS[key], "difficulty": area.difficulty} for key, area in ROUTES.items()],
+                    "description": REGIONS[key], "difficulty": area.difficulty, "lore": LORE[area.art]} for key, area in ROUTES.items()],
         "jobs": [{"key": key, "name": name, "description": description, "art": art}
                  for key, (name, description, art) in JOBS.items()],
-        "enemies": [{"key": key, "name": data[0], "level": data[1], "art": "ash-keeper" if key == "keeper" else key}
-                    for key, data in ENEMIES.items()],
+        "enemies": foes,
         "professions": PROFESSIONS,
         "quests": [{"key": key, "npc": npc, "description": text, "art": QUEST_ART[key],
                     "title": ROUTES[key].title if key in ROUTES else "Пепельный смотритель"}

@@ -116,7 +116,7 @@ def present(db, user_id, update_id, reply, command, argument, route_before=None,
     hero = db.execute("SELECT * FROM heroes WHERE user_id = ?", (user_id,)).fetchone()
     route = hero["route"] if hero else None
     if command == "/start":
-        return controls(home_rows(db, user_id, hero)), "village"
+        return controls(home_rows(db, user_id, hero)), "ash-border"
     if route and command in {"/adventure", "/choose"} and reply.endswith(encounter(db, user_id, route)):
         index, scene, prepared = current_scene(db, user_id, route)
         _, _, detour = detour_state(db, user_id, route, index, prepared)

@@ -10,6 +10,7 @@ ASSET_DIR = Path(__file__).resolve().parent / "assets"
 GALLERY = {
     "places": ("Места и сражения", {
         "village": "Поселение на границе леса",
+        "ash-border": "Пограничные ворота",
         "misty-forest": "Туманный лес",
         **{area.art: area.title for key, area in ROUTES.items() if key != "forest"},
         "ash-keeper": "Пепельный смотритель",

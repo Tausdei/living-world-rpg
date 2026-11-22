@@ -4,6 +4,7 @@ from secrets import token_hex
 
 from activities import record_objective, reward, stats
 from campaign import mark
+from lore import LORE
 
 
 HUNT_DELAY = 180
@@ -69,7 +70,9 @@ def hunt_scene(state):
     heavy = state["turn"] % 3 == 0
     warning = "⚠️ Противник готовит сильный удар." if heavy else "Противник готовит обычную атаку."
     heal = "Настой уже использован." if state["used_heal"] else "/turn_heal — выпить настой (раз за бой)"
-    return (f"{name} · ход {state['turn']}\n"
+    art = "ash-keeper" if state["enemy"] == "keeper" else state["enemy"]
+    intro = f"{LORE[art]}\n\n" if state["turn"] == 1 else ""
+    return (intro + f"{name} · ход {state['turn']}\n"
             f"Здоровье героя: {state['hp']}/{state['max_hp']} · противника: {state['foe_hp']}\n"
             f"{warning}\n/turn_strike · /turn_guard · /turn_retreat\n{heal}")
 

@@ -57,6 +57,11 @@ function cardList(...cards) {
 }
 function actions(...buttons) { return make("div", { class: "actions" }, ...buttons); }
 function heading(text) { return make("h2", {}, text); }
+const slots = { armor: "Броня", charm: "Оберег", weapon: "Оружие", ring: "Кольцо", amulet: "Амулет" };
+function archiveNote(story) {
+  return make("aside", { class: "archive-note", "aria-label": "Запись из архива" },
+    make("h2", {}, "Запись из архива"), make("p", {}, story));
+}
 function link(label, destination, primary = false) {
   return make("a", { class: primary ? "action primary" : "action", href: destination }, label);
 }
@@ -117,7 +122,8 @@ async function perform(command) {
       townReceivedAt = performance.now();
       if (townSection() !== townPage.section) location.hash = townPage.section ? `#town-${townPage.section}` : "#town";
     }
-    if (command?.startsWith("/adventure_") && game.encounter) location.hash = "#journey";
+    if ((command?.startsWith("/adventure_") && game.encounter)
+      || (command?.startsWith("/hunt_") && game.battle)) location.hash = "#journey";
     render();
     if (focusedCommand) {
       const current = [...view.querySelectorAll("[data-command]:not(:disabled)")]
@@ -127,6 +133,7 @@ async function perform(command) {
     if (command?.startsWith("/create ") && townSection() !== null) openTown();
     const openedScreen = (game.hero && command?.startsWith("/create "))
       || (game.encounter && command?.startsWith("/adventure_"))
+      || (game.battle && command?.startsWith("/hunt_"))
       || (game.practice && ["/practice_scout", "/practice_herbalist"].includes(command));
     if (response.message && !openedScreen) {
       const hasLiveActions = (game.battle && command?.startsWith("/turn_"))
@@ -219,7 +226,7 @@ function camp() {
     : game.practice ? game.practice.title
     : chapter ? `Глава ${story.completed + 1}/${story.chapters.length} · ${chapter.title}` : "История поселения завершена.";
   return [
-    banner("village", "Поселение у леса", description, { footer: actions(link(...next, true),
+    banner("ash-border", "Поселение у леса", description, { footer: actions(link(...next, true),
       next[1] === "#story" ? null : link("История", "#story")) }),
     goal && next[1] === "#story" ? make("p", { class: "next-goal" }, "Следующая цель: ", goal.label) : null,
     heading("Быстрый доступ"),
@@ -272,6 +279,7 @@ function regionPage(route) {
       make("p", { class: "muted" }, `Твои ранги: следопыт ${Math.floor(game.hero.scout / 3)}, травник ${Math.floor(game.hero.herbalist / 3)}.`),
       actions(available ? start : make("p", {}, `Откроется на уровне ${route.level}.`),
         link("Развить навыки", "#work"))),
+    archiveNote(route.lore),
   ];
 }
 
@@ -311,23 +319,46 @@ function journeys() {
       `${game.hero.level < route.level ? "Закрыто · " : ""}Уровень ${route.level}${route.scenes > 1 ? " · 2 этапа" : ""}`, `#route-${route.key}`))),
     heading("Пошаговая охота"),
     cardList(game.enemies.map(enemy => tile(enemy.art, enemy.name,
-      game.hero.level < enemy.level ? `Закрыто · уровень ${enemy.level}` : "Начать бой",
-      `/hunt_${enemy.key}`, false, game.hero.level < enemy.level))),
+      game.hero.level < enemy.level ? `Доступно с уровня ${enemy.level}` : "Открыть запись",
+      `#foe-${enemy.key}`))),
+  ];
+}
+
+function enemyPage(enemy) {
+  const available = game.hero.level >= enemy.level;
+  return [
+    back("Походы", "#journey"),
+    banner(enemy.art, enemy.name, "", { compact: true }),
+    feedbackPanel(
+      make("p", {}, available ? `Охота · уровень ${enemy.level}` : `Охота откроется на уровне ${enemy.level}.`),
+      available ? actions(button("Начать бой", `/hunt_${enemy.key}`, true)) : null),
+    archiveNote(enemy.lore),
+  ];
+}
+
+function itemPage(item) {
+  const stat = item.slot === "weapon" ? "атаке" : "здоровью";
+  return [
+    back("Снаряжение", "#hero"),
+    banner(item.key, item.name, "", { compact: true }),
+    feedbackPanel(make("p", {}, `${slots[item.slot]} · +${item.bonus} к ${stat} · Количество: ${item.quantity}`),
+      item.worn ? make("p", { class: "equipped-label" }, "✓ Надето")
+        : actions(button("Надеть", `/equip_${item.key}`, true))),
+    archiveNote(item.lore),
   ];
 }
 
 function heroPage() {
   const hero = game.hero;
   const wornFirst = [...game.bag].sort((a, b) => Number(b.worn) - Number(a.worn));
-  const slots = { armor: "Броня", charm: "Оберег", weapon: "Оружие", ring: "Кольцо", amulet: "Амулет" };
   return [
     banner("hero", hero.name, `Уровень ${hero.level} · Здоровье ${hero.hp} · Атака ${hero.attack}`, { compact: true }),
     make("section", { class: "panel battle" }, metre("Опыт до следующего уровня", hero.xp % 30, 30),
       make("p", {}, `${hero.coins} монет`)),
     heading("Снаряжение"),
     wornFirst.length ? cardList(wornFirst.map(item => tile(item.key, item.name,
-      `${slots[item.slot]} · +${item.bonus} · ×${item.quantity}${item.worn ? " · надето" : " · надеть"}`,
-      `/equip_${item.key}`, item.worn))) : make("p", { class: "muted" }, "Сумка пуста. Найди первую добычу в походе."),
+      `${slots[item.slot]} · +${item.bonus} · ×${item.quantity}${item.worn ? " · надето" : " · осмотреть"}`,
+      `#item-${item.key}`, item.worn))) : make("p", { class: "muted" }, "Сумка пуста. Найди первую добычу в походе."),
     heading("Профессии"),
     cardList(Object.entries(game.professions).map(([key, name]) => tile(key, name,
       `Очков навыка: ${hero[key]} · Тренировка за 5 монет`, `/train_${key}`))),
@@ -484,7 +515,7 @@ function render() {
   navigation.hidden = !game.hero;
   statusLine.hidden = !game.hero;
   if (!game.hero) {
-    view.replaceChildren(banner("village", "Живой мир", "Твоя история начинается у границы Туманного леса."),
+    view.replaceChildren(banner("ash-border", "Живой мир", "Твоя история начинается у границы Туманного леса."),
       feedbackPanel(heading("Создай героя"), inputForm("Имя героя", "Войти в мир", "/create"),
         make("details", { class: "activity-details" }, make("summary", {}, "Уже есть герой"), restoreForm())));
     mountNotice();
@@ -493,15 +524,22 @@ function render() {
   const page = location.hash.slice(1);
   const pages = { camp, story: storyPage, journey: journeys, hero: heroPage, work, journal, company };
   const region = page.startsWith("route-") ? game.routes.find(route => route.key === page.slice(6)) : null;
+  const item = page.startsWith("item-") ? game.bag.find(entry => entry.key === page.slice(5)) : null;
+  const foe = page.startsWith("foe-") ? game.enemies.find(entry => entry.key === page.slice(4)) : null;
   const town = townSection();
-  const current = town !== null ? "town" : region ? "journey" : Object.hasOwn(pages, page) ? page : "camp";
+  const current = town !== null ? "town" : region || foe ? "journey" : item ? "hero" : Object.hasOwn(pages, page) ? page : "camp";
   const activeNav = navigationParents[current] || current;
   navigation.replaceChildren(...navigationItems.map(([key, label, symbol]) =>
     make("a", { href: `#${key}`, "aria-current": key === activeNav ? "page" : null },
       make("span", { "aria-hidden": "true", class: "nav-icon" }, symbol), label)));
   statusLine.replaceChildren(make("strong", {}, game.hero.name),
     make("span", {}, `Ур. ${game.hero.level} · ${game.hero.coins} монет`));
-  const content = town !== null ? townScreen(town) : region ? regionPage(region) : pages[current]();
+  let content;
+  if (town !== null) content = townScreen(town);
+  else if (region) content = regionPage(region);
+  else if (item) content = itemPage(item);
+  else if (foe) content = enemyPage(foe);
+  else content = pages[current]();
   view.replaceChildren(...content.filter(Boolean));
   mountNotice();
   startCaveTimer();

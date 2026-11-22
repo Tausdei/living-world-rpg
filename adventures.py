@@ -3,6 +3,7 @@ from dataclasses import dataclass
 
 from activities import QUESTS, record_objective, reward
 from campaign import mark
+from lore import LORE
 from region_details import DETOURS, HELP_COST, REGIONS
 
 
@@ -122,7 +123,7 @@ def region(key):
     preparation = (f"Подготовка с ранга {max(0, route.difficulty - 1)} облегчает финал.\n"
                    if len(route.scenes) > 1 else "")
     return (f"{route.title} · уровень {route.level}\n{REGIONS[key]}\n"
-            f"Этапов: {len(route.scenes)}. {rank}\n{preparation}/adventure_{key} — отправиться")
+            f"\n{LORE[route.art]}\n\nЭтапов: {len(route.scenes)}. {rank}\n{preparation}/adventure_{key} — отправиться")
 
 
 def detour_state(db, user_id, key, index, prepared):
