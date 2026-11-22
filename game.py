@@ -19,16 +19,33 @@ COMMANDS = {
     "adventure": "Выбрать маршрут",
     "choose": "Принять решение в походе",
 }
+SHORTCUTS = {
+    "adventure_forest": ("adventure", "forest"),
+    "adventure_ruins": ("adventure", "ruins"),
+    "choose_1": ("choose", "1"),
+    "choose_2": ("choose", "2"),
+    "train_scout": ("train", "scout"),
+    "train_herbalist": ("train", "herbalist"),
+    "quest_forest": ("quest", "forest"),
+    "quest_keeper": ("quest", "keeper"),
+    "raid_open": ("raid", "open"),
+    "raid_start": ("raid", "start"),
+    "raid_leave": ("raid", "leave"),
+    "pvp_decline": ("pvp", "decline"),
+    **{f"equip_{item}": ("equip", item) for item in activities.ITEMS},
+}
+INVITE_COMMAND = re.compile(r"/(raid_join|pvp_accept)_([0-9]{1,18})")
+
 HELP = """Живой мир
 /create Имя — создать героя
 /hero — уровень, опыт и монеты
 /journal — что случилось с героем
 /professions — навыки
-/train scout или /train herbalist — обучение
+/train_scout или /train_herbalist — обучение
 /adventure — маршруты
-/choose 1 или /choose 2 — решение в походе
-/bag, /equip — добыча и снаряжение
-/npc, /quest — NPC и задания
+/choose_1 или /choose_2 — решение в походе
+/bag — добыча и снаряжение
+/npc — NPC и задания
 /boss — Пепельный смотритель
 /pvp — дуэли
 /raid — рейд на Каменного колосса"""
@@ -79,7 +96,7 @@ def connect(path):
 def encounter(route):
     description, *options = ROUTES[route]
     choices = "\n".join(
-        f"/choose {number} — {label} ({PROFESSIONS[skill]})"
+        f"/choose_{number} — {label} ({PROFESSIONS[skill]})"
         for number, (skill, label, _) in enumerate(options, 1)
     )
     return f"{description}\n{choices}"
@@ -94,6 +111,12 @@ def play(db, user_id, message, bot_name=None):
     if mention and mention != bot_name:
         return None
     argument = args[0] if args else ""
+    if command.startswith("/") and command[1:] in SHORTCUTS:
+        base, argument = SHORTCUTS[command[1:]]
+        command = f"/{base}"
+    elif invite := INVITE_COMMAND.fullmatch(command):
+        base, action = invite[1].split("_")
+        command, argument = f"/{base}", f"{action} {invite[2]}"
     if command in {"/start", "/help"}:
         return HELP
 
@@ -147,7 +170,7 @@ def play(db, user_id, message, bot_name=None):
         if hero["route"]:
             return "Сначала закончи поход. /adventure"
         if argument not in PROFESSIONS:
-            return "/train scout — следопыт\n/train herbalist — травник"
+            return "/train_scout — следопыт\n/train_herbalist — травник"
         if hero["coins"] < 5:
             return "Для тренировки нужно 5 монет."
         db.execute(f"UPDATE heroes SET {argument} = {argument} + 1, coins = coins - 5 WHERE user_id = ?", (user_id,))
@@ -158,7 +181,7 @@ def play(db, user_id, message, bot_name=None):
         if route:
             return encounter(route)
         if argument not in ROUTES:
-            return "/adventure forest — Туманный лес\n/adventure ruins — Старая башня (с уровня 2)"
+            return "/adventure_forest — Туманный лес\n/adventure_ruins — Старая башня (с уровня 2)"
         if argument == "ruins" and level < 2:
             return "Старая башня откроется на уровне 2."
         db.execute("UPDATE heroes SET route = ? WHERE user_id = ?", (argument, user_id))

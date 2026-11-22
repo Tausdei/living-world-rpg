@@ -122,7 +122,7 @@ def inventory(db, hero, argument, equip=False):
         name, slot, bonus = ITEMS[item]
         stat = "урону" if slot == "weapon" else "здоровью"
         worn = " · надето" if row["worn"] else ""
-        lines.append(f"{name} ×{row['quantity']} · +{bonus} к {stat}{worn} · /equip {item}")
+        lines.append(f"{name} ×{row['quantity']} · +{bonus} к {stat}{worn} · /equip_{item}")
     return "\n".join(lines)
 
 
@@ -132,7 +132,7 @@ def quest(db, hero_id, argument):
         "keeper": ("Архивист Орин", "Победи Пепельного смотрителя.", 1, 30, 25, None),
     }
     if not argument:
-        return "\n".join(f"{npc}: {goal} /quest {key}" for key, (npc, goal, *_) in quests.items())
+        return "\n".join(f"{npc}: {goal} /quest_{key}" for key, (npc, goal, *_) in quests.items())
     if argument not in quests:
         return "Доступные задания: /npc"
     npc, goal, target, xp, coins, item = quests[argument]
@@ -188,7 +188,7 @@ def raid(db, hero, argument, now):
     """, (hero_id,)).fetchone()
     if not action:
         current = f"Твой отряд: {room['id']}.\n" if room else ""
-        return current + "Каменный колосс (ур. 3, 2–4 героя)\n/raid open · /raid join НОМЕР · /raid start · /raid leave"
+        return current + "Каменный колосс (ур. 3, 2–4 героя)\n/raid_open · /raid_start · /raid_leave\nДля входа нажми команду приглашения или введи /raid join НОМЕР."
     day = now // 86400
     if action in {"open", "join"}:
         if hero["xp"] < 60:
@@ -196,7 +196,7 @@ def raid(db, hero, argument, now):
         if db.execute("SELECT 1 FROM raid_victory WHERE hero_id = ? AND day = ?", (hero_id, day)).fetchone():
             return "Награда за Колосса уже получена сегодня. Возвращайся после полуночи UTC."
         if room:
-            return f"Ты уже в отряде {room['id']}. /raid leave"
+            return f"Ты уже в отряде {room['id']}. /raid_leave"
         if action == "open":
             room_id = db.execute("INSERT INTO raid_rooms (leader) VALUES (?)", (hero_id,)).lastrowid
         else:
@@ -206,7 +206,7 @@ def raid(db, hero, argument, now):
             if db.execute("SELECT COUNT(*) FROM raid_members WHERE room = ?", (room_id,)).fetchone()[0] >= 4:
                 return "В отряде уже четыре героя."
         db.execute("INSERT INTO raid_members VALUES (?, ?)", (hero_id, room_id))
-        return f"Ты в отряде {room_id}. Приглашение: /raid join {room_id}. Лидер начинает через /raid start."
+        return f"Ты в отряде {room_id}. Приглашение: /raid_join_{room_id}. Лидер начинает через /raid_start."
     if action not in {"leave", "start"}:
         return "Команды рейда: /raid"
     if not room:
@@ -254,8 +254,8 @@ def duel(db, hero, argument, now):
         record = db.execute("SELECT * FROM duel_record WHERE hero_id = ?", (hero_id,)).fetchone()
         score = f"{record['wins']} побед / {record['losses']} поражений" if record else "0 побед / 0 поражений"
         invite = db.execute("SELECT challenger FROM duel_invites WHERE target = ? AND expires > ?", (hero_id, now)).fetchone()
-        pending = f"\nВходящий вызов: /pvp accept {invite['challenger']}" if invite else ""
-        return f"Твой ID: {hero_id} · {score}\n/pvp challenge ID · /pvp accept ID · /pvp decline{pending}"
+        pending = f"\nВходящий вызов: /pvp_accept_{invite['challenger']}" if invite else ""
+        return f"Твой ID: {hero_id} · {score}\n/pvp challenge ID · /pvp_decline{pending}"
     if action == "decline":
         db.execute("DELETE FROM duel_invites WHERE target = ?", (hero_id,))
         return "Входящий вызов отклонён."
@@ -268,7 +268,7 @@ def duel(db, hero, argument, now):
         if db.execute("SELECT 1 FROM duel_invites WHERE challenger = ? OR target = ?", (hero_id, other_id)).fetchone():
             return "У тебя уже есть исходящий вызов или у соперника занят входящий слот. Вызовы действуют 10 минут."
         db.execute("INSERT INTO duel_invites VALUES (?, ?, ?)", (other_id, hero_id, now + INVITE_SECONDS))
-        return f"Вызов для {other['name']}. Передай сопернику команду /pvp accept {hero_id}."
+        return f"Вызов для {other['name']}. Передай сопернику команду /pvp_accept_{hero_id}."
     if action != "accept":
         return "Команды дуэли: /pvp"
     invite = db.execute("""
