@@ -248,6 +248,9 @@ def panel(db, hero, argument, now):
                 "Восстановление: 1 за 15 минут. Попытки и дневные награды обновляются в 00:00 UTC.")
         if run:
             text += "\n" + contest_scene(run)
+            text += "\nЭнергия тратится при входе. Текущую серию можно закончить даже при 0 энергии."
+            text += ("\nРовный бой — обычный урон. Осторожный бой — меньше урона с обеих сторон. "
+                     "Рывок — больше урона с обеих сторон.")
             buttons = [button(name, f"battle {key} {run['token']}") for key, name in STANCES.items()]
             buttons.append(button("Отступить", f"battle retreat {run['token']}"))
         else:

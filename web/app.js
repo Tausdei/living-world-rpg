@@ -21,7 +21,7 @@ function make(tag, options = {}, ...children) {
   for (const [key, value] of Object.entries(options)) {
     if (value !== null && value !== undefined) element.setAttribute(key, value);
   }
-  element.append(...children.flat().filter(child => child != null));
+  element.append(...children.flat(Infinity).filter(child => child != null));
   return element;
 }
 

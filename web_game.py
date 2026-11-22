@@ -134,6 +134,8 @@ def state(db, user_id):
 
 
 class GameHandler(BaseHTTPRequestHandler):
+    timeout = 15
+
     def respond(self, payload, content_type, cookie=None, status=200):
         self.send_response(status)
         self.send_header("Content-Type", content_type)
@@ -141,7 +143,9 @@ class GameHandler(BaseHTTPRequestHandler):
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Cache-Control", "no-store" if content_type.startswith("application/json") else "no-cache")
         if cookie:
-            self.send_header("Set-Cookie", f"{COOKIE}={cookie}; Path=/; HttpOnly; SameSite=Strict; Max-Age=31536000")
+            secure = "; Secure" if self.server.public_origin else ""
+            self.send_header("Set-Cookie",
+                             f"{COOKIE}={cookie}; Path=/; HttpOnly; SameSite=Strict; Max-Age=31536000{secure}")
         self.end_headers()
         self.wfile.write(payload)
 
@@ -215,7 +219,9 @@ class GameHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = urlsplit(self.path).path
-        if path == "/api/state":
+        if path == "/healthz":
+            self.respond(b"ok\n", "text/plain; charset=utf-8")
+        elif path == "/api/state":
             self.game_response()
         elif path in STATIC:
             filename, mime = STATIC[path]
@@ -234,7 +240,8 @@ class GameHandler(BaseHTTPRequestHandler):
             self.send_error(404)
             return
         origin = self.headers.get("Origin")
-        if origin and origin != f"http://{self.headers.get('Host')}":
+        expected_origin = self.server.public_origin or f"http://{self.headers.get('Host')}"
+        if origin and origin != expected_origin:
             self.send_error(403)
             return
         if self.headers.get_content_type() != "application/json":
@@ -260,11 +267,19 @@ class GameHandler(BaseHTTPRequestHandler):
 def main():
     port = int(os.environ.get("WEB_PORT", "8080"))
     database = os.environ.get("WEB_GAME_DB", "living-world-web.sqlite3")
+    bind = os.environ.get("WEB_BIND", "127.0.0.1")
+    public_origin = os.environ.get("WEB_PUBLIC_ORIGIN", "").strip().rstrip("/")
+    if public_origin:
+        parsed = urlsplit(public_origin)
+        if (parsed.scheme != "https" or not parsed.hostname or parsed.path
+                or parsed.query or parsed.fragment or parsed.username is not None):
+            raise SystemExit("WEB_PUBLIC_ORIGIN должен быть адресом сайта HTTPS без пути, например https://game.example.org.")
     with closing(connect_web(database)):
         pass
-    with ThreadingHTTPServer(("127.0.0.1", port), GameHandler) as server:
+    with ThreadingHTTPServer((bind, port), GameHandler) as server:
         server.database = database
-        print(f"Живой мир · http://localhost:{port}", flush=True)
+        server.public_origin = public_origin
+        print("Живой мир · " + (public_origin or f"http://localhost:{port}"), flush=True)
         try:
             server.serve_forever()
         except KeyboardInterrupt:

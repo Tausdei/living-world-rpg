@@ -1,0 +1,8 @@
+**
+!*.py
+!assets/
+!assets/*.jpg
+!web/
+!web/*.html
+!web/*.js
+!web/*.css
