@@ -5,6 +5,7 @@ import time
 from datetime import UTC, datetime
 
 import activities
+from art_catalog import GALLERY, TITLES
 from world import advance_hero, init_world, schedule_hero
 
 
@@ -14,6 +15,8 @@ COMMANDS = {
     "create": "Создать персонажа",
     "journal": "Журнал событий героя",
     "hero": "Посмотреть персонажа",
+    "gallery": "Галерея иллюстраций",
+    "art": "Открыть иллюстрацию по имени",
     "professions": "Посмотреть профессии",
     "train": "Обучиться профессии",
     "adventure": "Выбрать маршрут",
@@ -48,7 +51,8 @@ HELP = """Живой мир
 /npc — NPC и задания
 /boss — Пепельный смотритель
 /pvp — дуэли
-/raid — рейд на Каменного колосса"""
+/raid — рейд на Каменного колосса
+/gallery — иллюстрации мира"""
 
 ROUTE_MENU = "/adventure_forest — Туманный лес\n/adventure_ruins — Старая башня (с уровня 2)"
 
@@ -112,7 +116,7 @@ def encounter(route):
     return f"{description}\n{choices}"
 
 
-def play(db, user_id, message, bot_name=None):
+def parse_command(message, bot_name=None):
     parts = message.strip().split(maxsplit=1)
     if not parts:
         return None
@@ -127,8 +131,23 @@ def play(db, user_id, message, bot_name=None):
     elif invite := INVITE_COMMAND.fullmatch(command):
         base, action = invite[1].split("_")
         command, argument = f"/{base}", f"{action} {invite[2]}"
+    return command, argument
+
+
+def play(db, user_id, message, bot_name=None):
+    parsed = parse_command(message, bot_name)
+    if parsed is None:
+        return None
+    command, argument = parsed
     if command in {"/start", "/help"}:
         return HELP
+    if command == "/gallery":
+        title, entries = GALLERY.get(argument, ("Галерея Живого мира", {}))
+        if entries:
+            return title + "\n" + "\n".join(f"{name} · /art {key}" for key, name in entries.items())
+        return title + "\n" + "\n".join(f"{name} · /gallery {key}" for key, (name, _) in GALLERY.items())
+    if command == "/art":
+        return TITLES.get(argument, "Выбери иллюстрацию в /gallery.")
 
     now = int(time.time())
     advance_hero(db, user_id, now)

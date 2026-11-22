@@ -5,17 +5,14 @@ import re
 import sys
 import time
 from contextlib import closing
-from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 from uuid import uuid4
 
-from game import COMMANDS, connect, play
+from art_catalog import TITLES, illustration_path
+from game import COMMANDS, connect, parse_command, play
 from telegram_menu import callback_command, present
 from world import advance_world
-
-
-FOREST_ART = Path(__file__).resolve().parent / "assets" / "misty-forest.jpg"
 
 
 class TelegramError(Exception):
@@ -35,7 +32,7 @@ def telegram(token, method, photo=None, **params):
                 f'--{boundary}\r\nContent-Disposition: form-data; name="{key}"\r\n\r\n{field}\r\n'.encode()
             )
         parts.append(
-            (f'--{boundary}\r\nContent-Disposition: form-data; name="photo"; filename="misty-forest.jpg"\r\n'
+            (f'--{boundary}\r\nContent-Disposition: form-data; name="photo"; filename="illustration.jpg"\r\n'
              'Content-Type: image/jpeg\r\n\r\n').encode() + photo + b"\r\n"
         )
         body = b"".join(parts) + f"--{boundary}--\r\n".encode()
@@ -75,9 +72,18 @@ def queue_reply(db, update, bot_name):
                 if notice:
                     ui["callback"]["text"] = notice
         if chat_id is not None and content.lstrip().startswith("/") and sender and not sender.get("is_bot"):
-            reply = play(db, sender["id"], content, bot_name)
-            if reply:
-                reply, ui["markup"], ui["forest_photo"] = present(db, sender["id"], update_id, reply)
+            user_id = sender["id"]
+            parsed = parse_command(content, bot_name)
+            if parsed:
+                command, argument = parsed
+                previous = None
+                if command == "/choose":
+                    previous = db.execute("SELECT route FROM heroes WHERE user_id = ?", (user_id,)).fetchone()
+                reply = play(db, user_id, content, bot_name)
+                if reply:
+                    ui["markup"], ui["art"] = present(
+                        db, user_id, update_id, reply, command, argument, previous["route"] if previous else None
+                    )
         db.execute(
             "UPDATE delivery SET next_offset = ?, chat_id = ?, reply = ? WHERE id = 1",
             (update_id + 1, chat_id if reply else None, reply),
@@ -91,14 +97,22 @@ def deliver_message(token, pending, ui):
     params = {"chat_id": pending["chat_id"]}
     if "markup" in ui:
         params["reply_markup"] = ui["markup"]
-    if ui.get("forest_photo") and FOREST_ART.is_file():
+    reply = pending["reply"]
+    art = ui.get("art") or ("misty-forest" if ui.get("forest_photo") else None)
+    path = illustration_path(art)
+    if path and path.is_file():
+        # Telegram counts captions in UTF-16 code units.
+        fits_caption = len(reply.encode("utf-16-le")) <= 2048
+        photo_params = params if fits_caption else {"chat_id": pending["chat_id"]}
         try:
-            telegram(token, "sendPhoto", photo=FOREST_ART.read_bytes(), caption=pending["reply"], **params)
-            return
+            telegram(token, "sendPhoto", photo=path.read_bytes(),
+                     caption=reply if fits_caption else TITLES[art], **photo_params)
+            if fits_caption:
+                return
         except TelegramError as error:
             if error.args[0] != 400:
                 raise
-    telegram(token, "sendMessage", text=pending["reply"], **params)
+    telegram(token, "sendMessage", text=reply, **params)
 
 
 def send_pending(db, token):
