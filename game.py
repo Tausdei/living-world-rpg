@@ -5,13 +5,20 @@ import time
 from datetime import UTC, datetime
 
 import activities
+import fieldwork
 from art_catalog import GALLERY, TITLES
-from world import advance_hero, init_world, schedule_hero
+from world import advance_hero, init_world, offline, schedule_hero
+from world_events import JOBS
 
 
 COMMANDS = {
     **activities.COMMANDS,
     "start": "Команды игры",
+    "offline": "Фоновое занятие героя",
+    "hunt": "Пошаговая охота",
+    "turn": "Действие текущего боя",
+    "practice": "Мини-игры профессий",
+    "practice_answer": "Ответ в мини-игре",
     "create": "Создать персонажа",
     "journal": "Журнал событий героя",
     "hero": "Посмотреть персонажа",
@@ -23,6 +30,11 @@ COMMANDS = {
     "choose": "Принять решение в походе",
 }
 SHORTCUTS = {
+    **{f"offline_{job}": ("offline", job) for job in JOBS},
+    **{f"hunt_{enemy}": ("hunt", enemy) for enemy in fieldwork.ENEMIES},
+    **{f"turn_{action}": ("turn", action) for action in fieldwork.HUNT_ACTIONS},
+    **{f"practice_{skill}": ("practice", skill) for skill in fieldwork.PRACTICES},
+    **{f"practice_answer_{choice}": ("practice_answer", choice) for choice in ("1", "2", "3", "cancel")},
     "adventure_forest": ("adventure", "forest"),
     "adventure_ruins": ("adventure", "ruins"),
     "choose_1": ("choose", "1"),
@@ -52,6 +64,9 @@ HELP = """Живой мир
 /boss — Пепельный смотритель
 /pvp — дуэли
 /raid — рейд на Каменного колосса
+/offline — выбрать фоновое занятие
+/hunt — пошаговые бои
+/practice — мини-игры профессий
 /gallery — иллюстрации мира"""
 
 ROUTE_MENU = "/adventure_forest — Туманный лес\n/adventure_ruins — Старая башня (с уровня 2)"
@@ -104,6 +119,7 @@ def connect(path):
     db.execute("PRAGMA foreign_keys = ON")
     init_world(db)
     activities.init_activities(db)
+    fieldwork.init_fieldwork(db)
     return db
 
 
@@ -169,8 +185,16 @@ def play(db, user_id, message, bot_name=None):
         return activities.inventory(db, hero, argument, equip=command == "/equip")
     if command in {"/npc", "/quest"}:
         return activities.quest(db, user_id, argument if command == "/quest" else "")
-    if command == "/boss":
-        return activities.boss(db, hero, now)
+    if command == "/offline":
+        return offline(db, user_id, argument)
+    if command in {"/hunt", "/boss"}:
+        return fieldwork.hunt(db, hero, argument if command == "/hunt" else "keeper", now)
+    if command == "/turn":
+        return fieldwork.turn(db, hero, argument, now)
+    if command == "/practice":
+        return fieldwork.practice(db, hero, argument, now)
+    if command == "/practice_answer":
+        return fieldwork.answer(db, hero, argument, now)
     if command == "/raid":
         return activities.raid(db, hero, argument, now)
     if command == "/pvp":
@@ -207,6 +231,8 @@ def play(db, user_id, message, bot_name=None):
 
     route = hero["route"]
     if command == "/adventure":
+        if fieldwork.active_hunt(db, user_id):
+            return "Сначала закончи текущий бой. /hunt"
         if route:
             return encounter(route)
         if argument not in ROUTES:

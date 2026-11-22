@@ -1,6 +1,8 @@
 """Illustration keys and the player-facing gallery."""
 from pathlib import Path
 
+from world_events import EVENTS
+
 
 ASSET_DIR = Path(__file__).resolve().parent / "assets"
 GALLERY = {
@@ -11,6 +13,8 @@ GALLERY = {
         "ash-keeper": "Пепельный смотритель",
         "colossus": "Каменный колосс",
         "arena": "Дуэльный двор",
+        "bandit": "Лесной разбойник",
+        "boar": "Дикий кабан",
     }),
     "people": ("Герои и профессии", {
         "hero": "Портрет странника",
@@ -18,6 +22,8 @@ GALLERY = {
         "orin": "Архивист Орин",
         "scout": "Следопыт",
         "herbalist": "Травник",
+        "scout-game": "Испытание следопыта",
+        "herbalist-game": "Испытание травника",
     }),
     "events": ("Походы и события", {
         "forest-tracks": "Следы у затопленного моста",
@@ -29,12 +35,28 @@ GALLERY = {
         "traveler": "Заблудившийся путник",
         "herbs": "Лечебные травы у ручья",
     }),
+    "offline": ("Жизнь между визитами", {
+        "merchant": "Странствующий торговец",
+        "chest": "Запертый сундук",
+        "storm": "Ливень",
+        "caravan": "Охрана каравана",
+        "relic": "Древний алтарь",
+        "fireflies": "Поляна светляков",
+        "camp": "Работа у костра",
+        "patrol": "Лесной дозор",
+        "forage": "Сбор трав",
+    }),
     "items": ("Добыча и награды", {
         "knife": "Походный нож",
         "blade": "Клинок стражи",
         "charm": "Плетёный оберег",
         "seal": "Печать смотрителя",
         "star": "Осколок звезды",
+        "vest": "Кожаный жилет",
+        "spear": "Рогатина дозорного",
+        "cloak": "Плащ путника",
+        "fang": "Волчий клык",
+        "lantern": "Фонарь духов",
         "rewards": "Опыт и монеты",
         "bag": "Походная сумка",
         "journal": "Журнал героя",
@@ -54,10 +76,7 @@ SCREEN_ART = {
     "/professions": "hero", "/train": "hero", "/boss": "ash-keeper",
     "/raid": "colossus", "/pvp": "arena", "/journal": "journal",
 }
-JOURNAL_ART = {
-    "лечебные травы": "herbs", "заблудившегося путника": "traveler",
-    "лесным волком": "wolf", "курганным призраком": "ghost",
-}
+JOURNAL_ART = {event[0]: key for key, event in EVENTS.items()}
 
 
 def illustration_path(key):

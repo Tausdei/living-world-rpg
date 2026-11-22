@@ -2,6 +2,9 @@
 import random
 import time
 
+from loot import gear_bonuses, grant_item
+from world_events import EVENTS, JOBS, POOLS
+
 EVENT_INTERVAL = 30 * 60
 MAX_CATCHUP = 24
 JOURNAL_SIZE = 30
@@ -12,6 +15,10 @@ def init_world(db):
         CREATE TABLE IF NOT EXISTS world_schedule (
             user_id INTEGER PRIMARY KEY REFERENCES heroes(user_id),
             next_event INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS world_jobs (
+            user_id INTEGER PRIMARY KEY REFERENCES heroes(user_id),
+            job TEXT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS world_schedule_due ON world_schedule(next_event);
         CREATE TABLE IF NOT EXISTS world_journal (
@@ -48,17 +55,34 @@ def fight_stats(health, attack, rng, enemy_hp, enemy_attack):
     return False
 
 
-def resolve_event(hero, rng):
-    event = rng.randrange(4)
-    if event == 0:
-        return "Ты нашёл лечебные травы у ручья.", 5, 2, 0, 1
-    if event == 1:
-        return "Ты вывел заблудившегося путника к дороге.", 6, 3, 1, 0
+def current_job(db, user_id):
+    job = db.execute("SELECT job FROM world_jobs WHERE user_id = ?", (user_id,)).fetchone()
+    return job["job"] if job else "roam"
 
-    enemy, hp, attack = ("лесным волком", 10, 3) if event == 2 else ("курганным призраком", 16, 4)
-    if fight_stats(*combat_stats(hero), rng, hp, attack):
-        return f"Ты победил в бою с {enemy}.", 10, 5, 1, 0
-    return f"Ты отступил после боя с {enemy}.", 3, 0, 1, 0
+
+def offline(db, user_id, job):
+    if job in JOBS:
+        db.execute("""
+            INSERT INTO world_jobs VALUES (?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET job = excluded.job
+        """, (user_id, job))
+        return f"Фоновое занятие: {JOBS[job][0]}. Оно вступит в силу со следующего события."
+    current = JOBS[current_job(db, user_id)][0]
+    rows = [f"Фоновое занятие: {current}. События происходят каждые 30 минут."]
+    rows.extend(f"/offline_{key} — {name}. {description}" for key, (name, description, _) in JOBS.items())
+    return "\n".join(rows)
+
+
+def resolve_event(hero, rng, job, bonuses):
+    description, xp, coins, scout, herbalist, item, enemy = EVENTS[rng.choice(POOLS[job])]
+    if enemy:
+        hp, attack = combat_stats(hero)
+        bonus_hp, bonus_attack = bonuses
+        if not fight_stats(hp + bonus_hp, attack + bonus_attack, rng, *enemy):
+            return f"Ты отступил после боя с {description}.", 3, 0, 1, 0, None
+        description = f"Ты победил в бою с {description}."
+    drop = item if item and rng.randrange(5) == 0 else None
+    return description, xp, coins, scout, herbalist, drop
 
 
 def advance_hero(db, user_id, now, rng=random):
@@ -68,15 +92,19 @@ def advance_hero(db, user_id, now, rng=random):
     first = scheduled["next_event"]
     due = (now - first) // EVENT_INTERVAL + 1
     first += max(0, due - MAX_CATCHUP) * EVENT_INTERVAL
+    job = current_job(db, user_id)
+    bonuses = gear_bonuses(db, user_id)
     for occurred_at in range(first, now + 1, EVENT_INTERVAL):
         hero = db.execute("SELECT * FROM heroes WHERE user_id = ?", (user_id,)).fetchone()
-        event, xp, coins, scout, herbalist = resolve_event(hero, rng)
+        event, xp, coins, scout, herbalist, item = resolve_event(hero, rng, job, bonuses)
         db.execute("""
             UPDATE heroes SET xp = xp + ?, coins = coins + ?,
                 scout = scout + ?, herbalist = herbalist + ? WHERE user_id = ?
         """, (xp, coins, scout, herbalist, user_id))
         skill = "Следопыт" if scout else "Травник"
         summary = f"{event} +{xp} опыта, +{coins} монет, +1 очко навыка «{skill}»."
+        if item:
+            summary += " " + grant_item(db, user_id, item) + "."
         if (hero["xp"] + xp) // 30 > hero["xp"] // 30:
             summary += f" Новый уровень: {1 + (hero['xp'] + xp) // 30}."
         db.execute("INSERT INTO world_journal VALUES (?, ?, ?)", (user_id, occurred_at, summary))

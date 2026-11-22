@@ -1,19 +1,20 @@
 """Inline navigation and illustrated responses for Telegram."""
 import re
 
-from activities import ITEMS
+from loot import ITEMS
 from art_catalog import (
     CHOICE_ART, GALLERY, JOURNAL_ART, QUEST_ART, ROUTE_ART, SCREEN_ART, TITLES,
 )
+from fieldwork_menu import ACTIONS as FIELDWORK_ACTIONS, fieldwork_view, step_command
 from game import ROUTE_MENU, ROUTES, encounter
 
 
 MENU = (
     (("Герой", "hero"), ("Походы", "adventure")),
     (("Сумка", "bag"), ("Квесты", "npc"), ("Журнал", "journal")),
-    (("Галерея", "gallery"),),
+    (("В отсутствие", "offline"), ("Мини-игры", "practice"), ("Галерея", "gallery")),
 )
-ACTIONS = {action for row in MENU for _, action in row} | {
+ACTIONS = FIELDWORK_ACTIONS | {action for row in MENU for _, action in row} | {
     "adventure_forest", "adventure_ruins", "start", "professions",
     "quest_forest", "quest_keeper", "train_scout", "train_herbalist",
     "boss", "raid", "pvp",
@@ -39,6 +40,9 @@ def callback_command(db, sender_id, data):
     kind, _, key = action.partition(":")
     if (kind == "gallery" and key in GALLERY) or (kind == "art" and key in TITLES):
         return f"/{kind} {key}", None
+    step = step_command(db, sender_id, action)
+    if step is not None:
+        return step
     choice = CHOICE.fullmatch(data)
     if choice:
         active = db.execute("""
@@ -75,7 +79,7 @@ def journal_illustrations(db, user_id):
     return list(keys)
 
 
-def present(db, user_id, update_id, reply, command, argument, route_before=None):
+def present(db, user_id, update_id, reply, command, argument, route_before=None, subject_before=None):
     hero = db.execute("SELECT route FROM heroes WHERE user_id = ?", (user_id,)).fetchone()
     route = hero["route"] if hero else None
     if route and reply == encounter(route):
@@ -92,11 +96,18 @@ def present(db, user_id, update_id, reply, command, argument, route_before=None)
     if reply == ROUTE_MENU:
         rows = (
             (("Туманный лес", "adventure_forest"), ("Старая башня", "adventure_ruins")),
-            (("Одиночный босс", "boss"), ("Рейды", "raid"), ("Дуэли", "pvp")),
+            (("Пошаговая охота", "hunt"), ("Одиночный босс", "boss")),
+            (("Рейды", "raid"), ("Дуэли", "pvp")),
             BACK,
         )
         return controls(rows), "village"
 
+    fieldwork = fieldwork_view(db, user_id, command, argument, subject_before)
+    if fieldwork:
+        fieldwork_rows, fieldwork_art = fieldwork
+        return controls([*fieldwork_rows, BACK]), fieldwork_art
+    if command == "/adventure" and reply == "Сначала закончи текущий бой. /hunt":
+        return controls([(("Вернуться в бой", "hunt"),), BACK]), "patrol"
     art = SCREEN_ART.get(command)
     rows = MENU
     if command == "/gallery":
@@ -125,6 +136,7 @@ def present(db, user_id, update_id, reply, command, argument, route_before=None)
             (("Следопыт", "art:scout"), ("Травник", "art:herbalist")),
             (("Тренировать следопыта", "train_scout"),),
             (("Тренировать травника", "train_herbalist"),),
+            (("Мини-игры", "practice"),),
             BACK,
         )
         if command == "/train" and argument in {"scout", "herbalist"}:

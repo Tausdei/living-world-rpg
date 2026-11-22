@@ -1,17 +1,10 @@
 """Loot, quests and multiplayer activities for the Telegram RPG."""
 import random
-import time
 
+from loot import ITEMS, gear_bonuses, grant_item
 from world import advance_hero, combat_stats, fight_stats
 
 
-ITEMS = {
-    "knife": ("Походный нож", "weapon", 1),
-    "blade": ("Клинок стражи", "weapon", 3),
-    "charm": ("Плетёный оберег", "charm", 2),
-    "seal": ("Печать смотрителя", "charm", 4),
-    "star": ("Осколок звезды", "charm", 6),
-}
 COMMANDS = {
     "bag": "Добыча и экипировка",
     "equip": "Надеть предмет",
@@ -82,11 +75,7 @@ def reward(db, hero_id, xp=0, coins=0, item=None):
         db.execute("UPDATE heroes SET xp = xp + ?, coins = coins + ? WHERE user_id = ?", (xp, coins, hero_id))
         description = f"+{xp} опыта, +{coins} монет"
     if item:
-        db.execute("""
-            INSERT INTO loot VALUES (?, ?, 1)
-            ON CONFLICT (hero_id, item) DO UPDATE SET quantity = quantity + 1
-        """, (hero_id, item))
-        description += f"{', ' if description else ''}добыча: {ITEMS[item][0]} ({item})"
+        description += (", " if description else "") + grant_item(db, hero_id, item)
     return description
 
 
@@ -117,12 +106,13 @@ def inventory(db, hero, argument, equip=False):
     if not rows:
         return "Сумка пуста. Первые предметы можно найти в походе."
     lines = ["Сумка"]
+    slots = {"weapon": "оружие", "armor": "броня", "charm": "оберег"}
     for row in rows:
         item = row["item"]
         name, slot, bonus = ITEMS[item]
         stat = "урону" if slot == "weapon" else "здоровью"
         worn = " · надето" if row["worn"] else ""
-        lines.append(f"{name} ×{row['quantity']} · +{bonus} к {stat}{worn} · /equip_{item}")
+        lines.append(f"{name} ×{row['quantity']} · {slots[slot]} · +{bonus} к {stat}{worn} · /equip_{item}")
     return "\n".join(lines)
 
 
@@ -150,27 +140,8 @@ def quest(db, hero_id, argument):
 
 def stats(db, hero):
     health, attack = combat_stats(hero)
-    for row in db.execute("SELECT item FROM equipped WHERE hero_id = ?", (hero["user_id"],)):
-        _, slot, bonus = ITEMS[row["item"]]
-        if slot == "weapon":
-            attack += bonus
-        else:
-            health += bonus
-    return health, attack
-
-
-def boss(db, hero, now):
-    hero_id = hero["user_id"]
-    if hero["xp"] < 30:
-        return "Пепельный смотритель доступен с уровня 2."
-    day = now // 86400
-    if db.execute("SELECT 1 FROM boss_victory WHERE hero_id = ? AND day = ?", (hero_id, day)).fetchone():
-        return "Пепельный смотритель уже побеждён сегодня. Он вернётся в полночь UTC."
-    if not fight_stats(*stats(db, hero), random, 19, 4):
-        return "Пепельный смотритель отбил атаку. Потренируйся, надень снаряжение и попробуй ещё раз."
-    db.execute("INSERT INTO boss_victory VALUES (?, ?) ON CONFLICT (hero_id) DO UPDATE SET day = excluded.day", (hero_id, day))
-    record_objective(db, hero_id, "keeper", 1)
-    return f"Пепельный смотритель повержен. {reward(db, hero_id, 22, 20, 'seal')}."
+    bonus_hp, bonus_attack = gear_bonuses(db, hero["user_id"])
+    return health + bonus_hp, attack + bonus_attack
 
 
 def numeric_id(value):

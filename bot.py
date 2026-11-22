@@ -10,6 +10,7 @@ from urllib.request import Request, urlopen
 from uuid import uuid4
 
 from art_catalog import TITLES, illustration_path
+from fieldwork_menu import previous_subject
 from game import COMMANDS, connect, parse_command, play
 from telegram_menu import callback_command, present
 from world import advance_world
@@ -79,10 +80,12 @@ def queue_reply(db, update, bot_name):
                 previous = None
                 if command == "/choose":
                     previous = db.execute("SELECT route FROM heroes WHERE user_id = ?", (user_id,)).fetchone()
+                subject = previous_subject(db, user_id, command)
                 reply = play(db, user_id, content, bot_name)
                 if reply:
                     ui["markup"], ui["art"] = present(
-                        db, user_id, update_id, reply, command, argument, previous["route"] if previous else None
+                        db, user_id, update_id, reply, command, argument,
+                        route_before=previous["route"] if previous else None, subject_before=subject,
                     )
         db.execute(
             "UPDATE delivery SET next_offset = ?, chat_id = ?, reply = ? WHERE id = 1",
